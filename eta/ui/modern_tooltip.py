@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 
 from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPointF, QRectF,
                             Qt, QTimer, QPropertyAnimation)
@@ -67,6 +68,12 @@ TIP_OPACITY = 0.95                        # конечная непрозрач�
 DWELL_MS = 400                            # задержка перед показом (hover)
 FADE_IN_MS = 150                          # появление
 FADE_OUT_MS = 100                         # скрытие
+# Сессия 19 (замечание заказчика о мерцании подсказок нод): окно
+# «успокоения». Скрытие, пришедшееся менее чем через SETTLE_MS после
+# показа, ОТКЛАДЫВАЕТСЯ на этот интервал – hover-чехарда (панель
+# перекрывала ноду, Leave спорил с Enter) не успевает проявиться
+# миганием, а позднее скрытие происходит само.
+SETTLE_MS = 180
 
 # формульные признаки: «=» И математический символ (мини-нотация/Unicode)
 _RE_FORMULA = re.compile(r"[=≈]")
@@ -397,6 +404,13 @@ class TooltipController(QObject):
         self._autohide = QTimer(self)
         self._autohide.setSingleShot(True)
         self._autohide.timeout.connect(self.hide_tip)
+        # Сессия 19: отложенное скрытие – чехарда Hide/Enter не должна
+        # превращаться в видимое мерцание (см. SETTLE_MS)
+        self._hide_settle = QTimer(self)
+        self._hide_settle.setSingleShot(True)
+        self._hide_settle.setInterval(SETTLE_MS)
+        self._hide_settle.timeout.connect(self._hide_now)
+        self._shown_ms: float = 0.0
         # кэш собранного HTML: ключ (id виджета, хэш текста)
         self._cache: dict[tuple[int, int], str] = {}
         app.installEventFilter(self)
@@ -440,6 +454,7 @@ class TooltipController(QObject):
             # перенацеливание БЕЗ мерцания: контент и позицию меняем сразу
             self._apply_content(widget, text)
             self.tip.place_near(QPointF(QCursor.pos()))
+            self._mark_shown()
             self._restart_autohide(widget)
             return
         self._dwell.start()
@@ -474,6 +489,7 @@ class TooltipController(QObject):
         self._apply_content(w, text)
         self.tip.place_near(QPointF(QCursor.pos()))
         self.tip.show_animated()
+        self._mark_shown()
         self._restart_autohide(w)
 
     def _restart_autohide(self, widget: QWidget) -> None:
@@ -498,12 +514,35 @@ class TooltipController(QObject):
         pos = QPointF(QCursor.pos() if global_pos is None else global_pos)
         self.tip.place_near(pos, instant=instant)
         self.tip.show_animated(instant=instant)
+        self._mark_shown()
         self._autohide.stop()
 
     def hide_tip(self, instant: bool | None = None) -> None:
+        """Скрыть подсказку. Сессия 19 (мерцание): скрытие, пришедшееся
+        менее чем через SETTLE_MS после показа, ОТКЛАДЫВАЕТСЯ – если за это
+        время панель перепозиционировали заново, отложенное скрытие
+        отменяется (см. `_mark_shown`), и чехарда hover не проявляется
+        миганием. Явный instant (тесты, hide_scene_tip) не откладывается."""
+        if not self.tip.isVisible():
+            self._hide_settle.stop()
+            return
+        if instant is None and self._shown_ms and \
+                (time.monotonic() - self._shown_ms) * 1000.0 < SETTLE_MS:
+            self._hide_settle.start(SETTLE_MS)
+            return
+        self._hide_now(instant=instant)
+
+    def _hide_now(self, instant: bool | None = None) -> None:
+        """Немедленное скрытие (самосброс отложенного тоже идёт сюда)."""
         instant = animations_disabled() if instant is None else instant
         self._autohide.stop()
         self.tip.hide_animated(instant=instant)
+
+    def _mark_shown(self) -> None:
+        """Панель только что показали: снять отложенное скрытие и
+        запомнить момент показа (окно анти-мерцания, сессия 19)."""
+        self._hide_settle.stop()
+        self._shown_ms = time.monotonic()
 
     # ---------- состояние для тестов ----------
     def is_visible(self) -> bool:
@@ -551,10 +590,15 @@ def scene_tip(global_pos, text: str, widget: QWidget | None = None) -> None:
 
 
 def hide_scene_tip() -> None:
-    """Скрыть подсказку холста (замена QToolTip.hideText)."""
+    """Скрыть подсказку холста (замена QToolTip.hideText).
+
+    Сессия 19: instant НЕ форсируется – решение принимает контроллер
+    (окно SETTLE_MS гасит чехарду hover Enter/Leave, из-за которой
+    подсказка ноды мерцала). В offscreen/без анимаций скрытие всё равно
+    мгновенное, поэтому тесты не меняются."""
     ctrl = _ACTIVE
     if ctrl is not None:
-        ctrl.hide_tip(instant=True)
+        ctrl.hide_tip()
         return
     from PySide6.QtWidgets import QToolTip
     QToolTip.hideText()

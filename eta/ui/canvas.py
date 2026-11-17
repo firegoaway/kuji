@@ -87,14 +87,14 @@ class AnnotationItem(QGraphicsItem):
         draw_annotation(p, self.ann)
 
     def hoverEnterEvent(self, e) -> None:
-        # Сессия 14/2: mapFromScene в этой сборке PySide6 возвращает
-        # QPoint (целочисленная перегрузка) – у него нет toPoint();
-        # оборачиваем в QPointF (конструктор принимает и QPoint, и
-        # QPointF), подсказки нод снова работают и консоль чиста
+        # Сессия 19 (замечание заказчика): якорь подсказки – КУРСОР.
+        # Прежний якорь «центр ноды → в глобальные координаты» ставил
+        # панель ровно НА саму ноду: попадание курсора на панель сбивало
+        # hover-зоны, Hide/Enter спорили между собой, и подсказка
+        # мерцала. (Сессия 14/2: mapFromScene в этой сборке возвращает
+        # QPoint без toPoint() – с курсорным якорем обход не нужен.)
         hide_scene_tip()
-        pos = QPointF(self.ctrl.canvas.mapFromScene(
-            self.ann.rect.center())).toPoint()
-        scene_tip(self.ctrl.canvas.viewport().mapToGlobal(pos),
+        scene_tip(QCursor.pos(),
                   "Справочная нода – перетащите; отпустите рядом"
                   " с нодой дерева, чтобы привязать", self.ctrl.canvas)
         super().hoverEnterEvent(e)
@@ -160,13 +160,11 @@ class NodeItem(QGraphicsItem):
             p.drawRoundedRect(self.geo.rect.adjusted(-3, -3, 3, 3), 9, 9)
 
     def hoverEnterEvent(self, e) -> None:
-        # Сессия 14/2: тот же фикс, что и у справочной ноды –
-        # QPointF(mapFromScene(...)).toPoint()
+        # Сессия 19: якорь – курсор (см. AnnotationItem.hoverEnterEvent):
+        # панель на центре ноды перекрывала её же hover-зону, и подсказка
+        # мерцала, когда курсор заходил на панель
         hide_scene_tip()
-        pos = QPointF(self.ctrl.canvas.mapFromScene(
-            self.geo.rect.center())).toPoint()
-        scene_tip(self.ctrl.canvas.viewport().mapToGlobal(pos),
-                  self.tip_text(), self.ctrl.canvas)
+        scene_tip(QCursor.pos(), self.tip_text(), self.ctrl.canvas)
         super().hoverEnterEvent(e)
 
     def hoverLeaveEvent(self, e) -> None:

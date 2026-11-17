@@ -188,6 +188,7 @@ from PySide6.QtCore import QEvent  # noqa: E402
 
 _LETTER_ACTIONS: dict[str, list] = {}       # "Ctrl+E" -> [(owner, action)]
 _LAST_FIRED: dict[str, float] = {}          # seq -> monotonic-время
+_IN_FLIGHT: set[str] = set()                # seq внутри action.trigger()
 _FIRE_DEBOUNCE_S = 0.08
 
 
@@ -201,9 +202,26 @@ def register_letter_action(seq: str, owner, action) -> None:
 
 def _dispatch_letter(seq: str) -> bool:
     """Запустить действие реестра для последовательности. Возвращает
-    True, если что-то запущено (событие нужно поглотить)."""
+    True, если что-то запущено (событие нужно поглотить).
+
+    Дебаунса 80 мс мало для МОДАЛЬНЫХ действий (замер живьём, заказчик
+    17.11.2026: Ctrl+E открывал диалог экспорта дважды). Причина: Qt
+    разносит ShortcutOverride по цепочке родителей синхронно, а фильтр
+    вызывает action.trigger() прямо посреди этого обхода. Если действие
+    запускает вложенный цикл событий (exec() модального диалога),
+    продолжение обхода наступает уже ПОСЛЕ закрытия окна – штамп
+    «последнего срабатывания» к тому времени устаревает, и следующий
+    объект цепочки запускает то же действие ещё раз. Отсюда два guard'а:
+
+      1) `_IN_FLIGHT` – одно физическое нажатие = один вход в действие
+         (автоповтор клавиатуры, пришедший во время модалки, гасится);
+      2) штамп `_LAST_FIRED` обновляется ПОСЛЕ возврата из действия,
+         чтобы возобновившаяся цепочка родителей попала в дебаунс.
+    """
     import time as _time
     now = _time.monotonic()
+    if seq in _IN_FLIGHT:
+        return True                   # действие ещё не вернулось (модалка)
     if now - _LAST_FIRED.get(seq, 0.0) < _FIRE_DEBOUNCE_S:
         return True                   # уже запущено этим нажатием
     from PySide6.QtWidgets import QApplication
@@ -219,18 +237,29 @@ def _dispatch_letter(seq: str) -> bool:
                 and w() is not active:
             continue                  # окно-владелец не активно
         _LAST_FIRED[seq] = now
-        action.trigger()
+        _IN_FLIGHT.add(seq)
+        try:
+            action.trigger()
+        finally:
+            _IN_FLIGHT.discard(seq)
+            # штамп после возврата – возобновившаяся цепочка родителей
+            # обязана попасть в дебаунс, а не запускать диалог второй раз
+            _LAST_FIRED[seq] = _time.monotonic()
         fired = True
     return fired
 
 
 def _seq_of(mods, letter: str) -> str | None:
+    """Каноническое имя последовательности для реестра. Shift – часть
+    имени (Ctrl+Shift+S «Сохранить как…»), Meta игнорируется веткой
+    вызова. Пара Ctrl+Alt не используется намеренно."""
     ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
     alt = bool(mods & Qt.KeyboardModifier.AltModifier)
+    shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
     if ctrl and not alt:
-        return "Ctrl+" + letter
+        return ("Ctrl+Shift+" if shift else "Ctrl+") + letter
     if alt and not ctrl:
-        return "Alt+" + letter
+        return ("Alt+Shift+" if shift else "Alt+") + letter
     return None
 
 
@@ -297,10 +326,14 @@ class LatinKeyFilter(QObject):
             key_debug_log("app", ev, obj)
         if ev.type() == QEvent.Type.ShortcutOverride:
             mods = ev.modifiers()
+            # Shift ДОПУЩЕН (сессия 19): «Сохранить как…» = Ctrl+Shift+S;
+            # в реестре ищется точное имя последовательности, поэтому
+            # незарегистрированные комбинации (в т. ч. Alt+Shift –
+            # переключатель раскладки Windows, у Shift нет буквы key())
+            # остаются нетронутыми. Meta (Win) по-прежнему исключаем.
             if mods & (Qt.KeyboardModifier.ControlModifier
                        | Qt.KeyboardModifier.AltModifier) \
-                    and not mods & (Qt.KeyboardModifier.ShiftModifier
-                                    | Qt.KeyboardModifier.MetaModifier):
+                    and not mods & Qt.KeyboardModifier.MetaModifier:
                 letter = latin_letter(ev)
                 if letter is not None:
                     seq = _seq_of(mods, letter)

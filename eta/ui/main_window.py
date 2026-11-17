@@ -151,6 +151,9 @@ class MainWindow(QMainWindow):
         # сессию (переиспользуется при каждом открытии диалога экспорта),
         # перегенерируется командой «Новый проект» и при перезапуске.
         self._report_uid = new_session_uid()
+        # Диалог экспорта модальный: флаг не даёт возобновившейся цепочке
+        # ShortcutOverride открыть его второй раз за одно нажатие (сессия 19)
+        self._export_running = False
         self._dirty = False
         self._selected_scenario: dict | None = None
         # Задача 1 (сессия 16): нода холста выделена КЛИКОМ ПОЛЬЗОВАТЕЛЯ
@@ -291,6 +294,16 @@ class MainWindow(QMainWindow):
         self.act_save.setShortcut(QKeySequence.StandardKey.Save)
         self.act_save.triggered.connect(self._save_project)
         m_file.addAction(self.act_save)
+        # Сессия 19 (запрос заказчика 17.11.2026): «Сохранить как…» –
+        # канонический Ctrl+Shift+S (StandardKey.SaveAs) плюс кириллический
+        # близнец Ctrl+Shift+Ы; на реальной Windows комбинацию доставляет
+        # реестр latin_keys (Shift разрешён с сессии 19)
+        self.act_save_as = QAction("Сохранить как…")
+        self.act_save_as.setShortcuts([
+            QKeySequence(QKeySequence.StandardKey.SaveAs),
+            QKeySequence("Ctrl+Shift+Ы")])
+        self.act_save_as.triggered.connect(self._save_project_as)
+        m_file.addAction(self.act_save_as)
         self.act_export = QAction("Экспорт в DOCX…")
         # Задача 3 (сессия 13): латинская + кириллическая (У) –
         # независимость от раскладки; Задача 2 (сессия 18): реестр
@@ -373,6 +386,9 @@ class MainWindow(QMainWindow):
         register_letter_action("Ctrl+D", self, self.act_doc_window)
         register_letter_action("Ctrl+Q", self, act_quit)
         register_letter_action("Alt+A", self, self.act_fit)
+        # Сессия 19: «Сохранить как…» – Ctrl+Shift+S (кириллический
+        # близнец Ы доставляется тем же реестром, Shift больше не исключён)
+        register_letter_action("Ctrl+Shift+S", self, self.act_save_as)
 
     def _wire(self) -> None:
         h = self.hierarchy
@@ -1525,21 +1541,12 @@ class MainWindow(QMainWindow):
         if msg:
             self.statusBar().showMessage(msg, 8000)
 
-    def _save_project(self) -> None:
-        if not self._project_path:
-            # Задача 12 (сессия 18): предзаполнение – последний каталог
-            # → папка проекта → Рабочий стол
-            path, _ = QFileDialog.getSaveFileName(
-                self, "Сохранить проект",
-                str(Path(self._dir_hint()) / "проект.kuji.json"),
-                "Проекты Kuji (*.kuji.json)")
-            if not path:
-                return
-            self._project_path = path
-        # Задача 3 (LOCKED 11б): состояние раскрытия иерархии – в файл
-        # (ui-словарь формата 5): свернутые объекты + свернутые строки
-        # сценариев (tree_id; ключ исторический) + свернутые строки
-        # причин (Задача 3, сессия 15; поле опциональное)
+    def _write_project(self, path: str) -> bool:
+        """Записать проект в КОНКРЕТНЫЙ путь – общий хвост «Сохранить» и
+        «Сохранить как…» (сессия 19, запрос заказчика): ui-словарь
+        состояния раскрытия иерархии (LOCKED 11б: поле опциональное,
+        формат 5), память папки проектов (ui/last_dir), сброс «изменено»
+        и заголовок. True – файл записан и проект живет под этим путём."""
         ui = {
             "hierarchy_collapsed": self.hierarchy.collapsed_ids(),
             "hierarchy_groups_collapsed":
@@ -1547,11 +1554,41 @@ class MainWindow(QMainWindow):
             "hierarchy_causes_collapsed":
                 self.hierarchy.collapsed_cause_ids(),
         }
-        save_project(self._project_path, self.objects, self.trees,
-                     project_name=Path(self._project_path).stem, ui=ui)
-        self._remember_dir(self._project_path)   # Задача 12 (сессия 18)
+        try:
+            save_project(path, self.objects, self.trees,
+                         project_name=Path(path).stem, ui=ui)
+        except Exception as exc:  # noqa: BLE001 – русская диагностика
+            QMessageBox.warning(self, "Сохранение проекта", f"Ошибка: {exc}")
+            return False
+        self._project_path = path
+        self._remember_dir(path)          # Задача 12 (сессия 18)
         self._dirty = False
         self._update_title()
+        return True
+
+    def _save_project(self) -> None:
+        if not self._project_path:
+            # У проекта ещё нет имени – «Сохранить» законно спрашивает
+            # путь (тот же диалог, что «Сохранить как…»)
+            self._save_project_as()
+            return
+        self._write_project(self._project_path)
+
+    def _save_project_as(self) -> None:
+        """Сессия 19 (запрос заказчика, Ctrl+Shift+S / Ctrl+Shift+Ы):
+        «Сохранить как…» – ВСЕГДА спрашивает новый путь; после успешной
+        записи текущий проект продолжает работать под новым именем
+        (каноническая семантика Save As, откат не затронут – файловые
+        операции в историю изменений не пишутся)."""
+        base = Path(self._project_path).name if self._project_path \
+            else "проект.kuji.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить проект как",
+            str(Path(self._dir_hint()) / base),
+            "Проекты Kuji (*.kuji.json)")
+        if not path:
+            return
+        self._write_project(path)
 
     def _export_docx(self) -> None:
         """Задачи 10/11 (сессия 18, LOCKED): единый DOCX-отчет –
@@ -1563,21 +1600,33 @@ class MainWindow(QMainWindow):
         Задача 3 (сессия 19, LOCKED): после успешного экспорта (диалог
         уже закрыт) окно спрашивает, открыть ли отчет."""
         from .dialogs import DocxExportDialog
-        dlg = DocxExportDialog(
-            parent=self,
-            # Задача 1: умное имя (сохраненный проект – его база имени,
-            # несохраненный – UID документной сессии)
-            suggested_name=report_docx_name(self._project_path,
-                                            self._report_uid),
-            start_dir=self._export_dir_hint(),
-            remember_dir=self._remember_export_dir)
-        dlg.set_project_data(self.objects, self.trees, self.kb,
-                             self.ctx_map(), self._owner_titles(),
-                             self.canvas)
-        if dlg.exec() != DocxExportDialog.Accepted:
+        if self._export_running:
+            # Защита от повторного входа: модальный exec() держит вложенный
+            # цикл событий, и возобновившаяся после его закрытия цепочка
+            # родителей ShortcutOverride могла бы открыть диалог ВТОРОЙ РАЗ
+            # (замечено заказчиком 17.11.2026; корень исправлен в
+            # latin_keys._dispatch_letter, это – второй пояс)
             return
-        self._after_docx_export(dlg.exported_path
-                                or dlg.path_edit.text())
+        self._export_running = True
+        try:
+            dlg = DocxExportDialog(
+                parent=self,
+                # Задача 1: умное имя (сохраненный проект – его база имени,
+                # несохраненный – UID документной сессии)
+                suggested_name=report_docx_name(self._project_path,
+                                                self._report_uid),
+                start_dir=self._export_dir_hint(),
+                remember_dir=self._remember_export_dir)
+            dlg.set_project_data(self.objects, self.trees, self.kb,
+                                 self.ctx_map(), self._owner_titles(),
+                                 self.canvas)
+            accepted = dlg.exec() == DocxExportDialog.Accepted
+            out = (dlg.exported_path or str(dlg.path_edit.text())) \
+                if accepted else ""
+        finally:
+            self._export_running = False
+        if accepted:
+            self._after_docx_export(out)
 
     def _after_docx_export(self, path: str) -> None:
         """Задачи 1/3 (сессия 19): что делает окно ПОСЛЕ успешного
