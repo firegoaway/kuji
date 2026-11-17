@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 from datetime import date
@@ -35,6 +36,8 @@ from xml.sax.saxutils import escape as _x
 
 from .. import __version__
 from ..core.objects import KIND_TITLES
+from .math_omml import display as _omml_display
+from .math_omml import inline as _omml_inline
 
 # Задача 3 (LOCKED): заголовок документа – титул и вершина модели
 REPORT_TITLE = "Расчет частоты возникновения пожара"
@@ -155,17 +158,19 @@ def owner_sections(objects, trees: list) -> list:
 
 
 def _site_row(sp: dict) -> tuple[str, str]:
-    """Задача 5/7 (LOCKED): только релевантный типу параметр места."""
+    """Задача 5/7 (LOCKED): только релевантный типу параметр места.
+    Сессия 20 (п.4): значение с размерностью – строчная OMML-формула."""
     from ..core.numfmt import fmt_num
     key, unit, letter = {
         "area": ("area_m2", "м²", "S"),
         "linear": ("length_m", "м", "L"),
         "apparatus": ("volume_m3", "м³", "V"),
     }.get(sp.get("site_type", "area"), ("area_m2", "м²", "S"))
-    names = {"S": "Площадь S", "L": "Длина L", "V": "Объем V"}
+    names = {"S": "Площадь ", "L": "Длина ", "V": "Объем "}
     v = sp.get(key)
-    return (names[letter],
-            f"{fmt_num(float(v))} {unit}" if v else "не задано")
+    return (names[letter] + _omml_inline(letter),
+            _omml_inline(f"{fmt_num(float(v))} {unit}") if v
+            else "не задано")
 
 
 def params_rows(tree, ctx, kb) -> list[tuple[str, str]]:
@@ -188,10 +193,11 @@ def params_rows(tree, ctx, kb) -> list[tuple[str, str]]:
                      (f"включена, категория {bp.get('lightning_cat', 'II')}"
                       if prot else "отключена")))
     rows.append(("Вероятность присутствия вещества",
-                 fmt_num(tree.substance.value)))
+                 _omml_inline(fmt_num(tree.substance.value))))
     rows.append(("Вероятность присутствия окислителя",
-                 fmt_num(tree.oxidizer.value)))
-    rows.append(("Коэффициент безопасности Kσ", fmt_num(tree.k_sigma)))
+                 _omml_inline(fmt_num(tree.oxidizer.value))))
+    rows.append(("Коэффициент безопасности "
+                 + _omml_inline("Kσ"), _omml_inline(fmt_num(tree.k_sigma))))
     if tree.fireball:
         rows.append(("Огненный шар", "включен"))
     return rows
@@ -214,32 +220,42 @@ def input_rows(tree, kb, ctx) -> list[tuple[str, str, str]]:
             title += f" – {kb.flow_titles[c.flow]}"
         if g.get("kind") == "p12":
             _v, _u = ctx.p12_value(c.len_m)
-            qv = (f"{fmt_num(g.get('q_per_m', 0))} м⁻¹·год⁻¹"
-                  f" × {fmt_num(_v)} {_u}")
+            qv = _omml_inline(f"{fmt_num(g.get('q_per_m', 0))} м⁻¹·год⁻¹"
+                              f" × {fmt_num(_v)} {_u}")
         elif g.get("kind") == "p13":
-            qv = "a₁·F / a·F^b (табл. П1.3/П1.4)"
+            # сессия 20 (п.4): сама запись формулы – математика,
+            # ссылка на таблицу Методики остаётся текстом
+            qv = _omml_inline("a₁·F / a·F^b") + " (табл. П1.3/П1.4)"
         else:
             v = ctx.p11_site_value()
-            qv = (f"{fmt_num(g.get('q', 0))} год⁻¹"
-                  + (f" × {fmt_num(v)}" if v else ""))
+            qv = _omml_inline(f"{fmt_num(g.get('q', 0))} год⁻¹"
+                              + (f" × {fmt_num(v)}" if v else ""))
         rows.append((title, qv, _src(g)))
     for c in tree.iz_causes:
         rec = kb.iz_by_id(c.ref) or {}
-        qv = (f"P = {fmt_num(rec['p'])}" if "p" in rec
-              else f"λ = {fmt_num(rec.get('lam', 0))} год⁻¹")
+        qv = (_omml_inline(f"P = {fmt_num(rec['p'])}") if "p" in rec
+              else _omml_inline(f"λ = {fmt_num(rec.get('lam', 0))} год⁻¹"))
         rows.append((rec.get("title", c.ref), qv, _src(rec)))
     return rows
 
 
 def result_lines(tree, kb, ctx) -> list[str]:
-    """«Результаты расчета»: подставленные формулы Q_j и строка
-    Q_В = Σ Q_i · Kσ (инженерная запись, запятая, юникод-степени)."""
+    """«Результаты расчета» (сессия 20, п.4): каждое расчётное выражение –
+    ВЫКЛЮЧНАЯ формула (`$$…$$` → `<m:oMathPara>`, по центру), русская
+    подпись сценария идёт отдельным абзацем ТЕКСТОМ (длинный русский текст
+    не смешивается с математикой), итог `Q_В = Σ Q_i · Kσ` – тоже
+    выключная формула. Возвращаются готовые Markdown-фрагменты: числа в
+    инженерной записи (`3,31·10⁻⁸ год⁻¹`) переведены в LaTeX, а не в
+    юникод-надстрочники, как на экране."""
     from ..core.numfmt import fmt_q, q_label
     out = []
     for j, r in enumerate(tree.scenarios(kb, ctx), start=1):
-        out.append(f"{q_label(j)} = {r.formula} = {fmt_q(r.q)} год⁻¹"
-                   f" ({r.name})")
-    out.append(f"Q_В = Σ Q_i · Kσ = {fmt_q(tree.total_q(kb, ctx))} год⁻¹")
+        out.append(_omml_display(
+            f"{q_label(j)} = {r.formula} = {fmt_q(r.q)} год⁻¹"))
+        if r.name:
+            out.append(_md_escape(f"({r.name})"))
+    out.append(_omml_display(
+        f"Q_В = Σ Q_i · Kσ = {fmt_q(tree.total_q(kb, ctx))} год⁻¹"))
     return out
 
 
@@ -250,12 +266,15 @@ def result_lines(tree, kb, ctx) -> list[str]:
 # не управляющие (ссылка требует «[text](url)» целиком), а имена
 # сценариев и формулы («1−exp(−3,2·10⁻⁶)») пестрят скобками
 _MD_SPECIAL = set("\\`*_{}[]#|~^<>!")
+# LaTeX-формулы (сессия 20, п.4): `$…$` и `$$…$$` экранировать НЕЛЬЗЯ –
+# внутри них живут `_`, `{`, `}` и `\`, а экранирование вернуло бы Word
+# обычный текст вместо OMML.
+# ВАЖНА захватывающая группа: с ней re.split чередует «текст, формула,
+# текст…» и формулы проходят экранирование нетронутыми.
+_MATH_SPAN = re.compile(r"(\$\$[^$]+\$\$|\$[^$\n]+\$)")
 
 
-def _md_escape(text: str) -> str:
-    """Экранирование спецсимволов Markdown в тексте строк/ячеек
-    (вертикальная черта обязательна в ячейках таблиц, крышка –
-    надстрочник pandoc, угловые – HTML)."""
+def _md_escape_plain(text: str) -> str:
     out = []
     for ch in str(text):
         if ch in _MD_SPECIAL:
@@ -265,6 +284,18 @@ def _md_escape(text: str) -> str:
         else:
             out.append(ch)
     return "".join(out)
+
+
+def _md_escape(text: str) -> str:
+    """Экранирование спецсимволов Markdown в тексте строк/ячеек
+    (вертикальная черта обязательна в ячейках таблиц, крышка –
+    надстрочник pandoc, угловые – HTML). Формулы в `$…$`/`$$…$$`
+    проходят нетронутыми."""
+    parts = _MATH_SPAN.split(str(text))
+    # split() с группой чередует: чётные индексы – обычный текст,
+    # нечётные – математические вставки
+    return "".join(p if i % 2 else _md_escape_plain(p)
+                   for i, p in enumerate(parts))
 
 
 def _md_table(header: list[str], rows: list) -> list[str]:
@@ -321,6 +352,19 @@ def _heading(level: int, text: str) -> str:
     return f"**{_md_escape(text)}**\n"
 
 
+def _md_header(header: list[str]) -> list[str]:
+    """Заголовки колонок матрицы (сессия 20, п.4): размерность уходит в
+    OMML, а русская часть остаётся текстом. На ЭКРАНЕ колонки читаются
+    как раньше (плоский текст берётся из core/matrix.py напрямую)."""
+    out = []
+    for h in header:
+        if h == "Q, год⁻¹":
+            out.append(_omml_inline("Q") + ", " + _omml_inline("год⁻¹"))
+        else:
+            out.append(h)
+    return out
+
+
 def build_markdown(objects, trees: list, kb, ctx_map: dict,
                    owner_titles: dict, fmt_id: str = "A4L",
                    image_files: list | None = None) -> str:
@@ -375,11 +419,14 @@ def build_markdown(objects, trees: list, kb, ctx_map: dict,
             md.extend(_md_table(["Событие", "Величина", "Источник"],
                                 input_rows(tree, kb, ctx)))
             md.append(_heading(sub_level, "Результаты расчета"))
+            # сессия 20 (п.4): фрагменты уже готовы к Markdown (формулы в
+            # $$…$$, подписи экранированы) – повторное экранирование не нужен
             for ln in result_lines(tree, kb, ctx):
-                md.append(_md_escape(ln) + "\n")
+                md.append(ln + "\n")
             total += tree.total_q(kb, ctx)
     if sections:
-        md.append(f"**Сумма по всем владельцам: {fmt_q(total)} год⁻¹**\n")
+        md.append("**Сумма по всем владельцам: "
+                  + _omml_inline(f"{fmt_q(total)} год⁻¹") + "**\n")
     md.append(_PAGEBREAK)
 
     # --- «Логическое дерево событий»: схема + матрица на владельца ----
@@ -393,12 +440,14 @@ def build_markdown(objects, trees: list, kb, ctx_map: dict,
             md.append(f"![]({png}){{width={_TEXT_COL_PX}px}}\n")
         data = build_matrix(owner_trees, kb, ctx_map,
                             {owner.id: owner.title})
-        md.extend(_md_table(data.header(), [
+        md.extend(_md_table(_md_header(data.header()), [
             [str(i + 1), r.title, r.scenario_type, r.name,
-             fmt_q(r.q), r.formula]
+             _omml_inline(fmt_q(r.q)), _omml_inline(r.formula)]
             for i, r in enumerate(data.rows)]))
         for _tid, _title, q in data.totals:
-            md.append(f"**Q_В = Σ Q_i · Kσ = {fmt_q(q)} год⁻¹**\n")
+            # сессия 20 (п.4): итог по дереву – выключная OMML-формула
+            md.append(_omml_display(f"Q_В = Σ Q_i · Kσ = {fmt_q(q)} год⁻¹")
+                      + "\n")
     return "\n".join(md)
 
 
@@ -479,7 +528,16 @@ def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
             cwd=str(tmp_dir))
         if r.returncode != 0:
             raise RuntimeError("Ошибка pandoc: " + r.stderr[:500])
-    # валидация результата: zip целый, титул и поле оглавления на месте
+    # Сессия 20 (п.2): зачистка пакета. Из ГОСТ-шаблона в файл приезжают
+    # docProps/app.xml с <Template>Normal.dotm</Template> (Word на таком
+    # документе запускает восстановление Normal.dotm – с макросами и
+    # предустановками пользователя), следы чужого шаблона в settings.xml и
+    # бесхозные медиа донора. Всё это убирается до того, как файл увидит
+    # пользователь; ошибка зачистки – обычная русская ошибка экспорта.
+    from .docx_tidy import tidy_package
+    tidy_package(path)
+    # валидация результата: zip целый, титул и поле оглавления на месте,
+    # формулы – настоящие OMML, чужих шаблонов в файле не осталось
     with zipfile.ZipFile(path) as z:
         if z.testzip() is not None:
             raise RuntimeError("Поврежденный docx-файл")
@@ -487,4 +545,13 @@ def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
         for probe in (REPORT_TITLE, 'TOC \\o "1-3"'):
             if probe not in doc:
                 raise RuntimeError("docx не содержит: " + probe)
+        if "<m:oMath" not in doc:
+            raise RuntimeError("docx не содержит формул OMML –"
+                               " математика ушла в Word текстом")
+        for name in [n for n in z.namelist()
+                     if n.endswith((".xml", ".rels"))]:
+            blob = z.read(name)
+            if b"Normal.dotm" in blob or b"attachedTemplate" in blob:
+                raise RuntimeError(
+                    f"В отчете остался след чужого шаблона Word: {name}")
     return path

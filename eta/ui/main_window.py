@@ -38,6 +38,7 @@ from ..core.objects import (KIND_TITLES, ObjectTree, ObjNode, TERRITORY,
                             tgm_levels)
 from ..core.serializer import (UnsupportedFormatError, load_project,
                                save_project)
+from . import app_settings as _as
 from .canvas import TreeCanvas
 from .doc_window import DocumentWindow
 from .docview import DocumentView
@@ -132,11 +133,16 @@ def migrate_qsettings() -> None:
     new = QSettings()
     if new.value("ui/migrated", False):
         return
-    old = QSettings("GraphiczD", "Freq ETA 533")
+    old = QSettings(QSettings.Format.NativeFormat,
+                    QSettings.Scope.UserScope, "GraphiczD", "Freq ETA 533")
+    # ВАЖНО (сессия 20): старый магазин читается ЯВНО из реестра, иначе
+    # после перевода приложения на INI этот вызов искал бы
+    # %APPDATA%\GraphiczD\Freq ETA 533.ini и не нашёл бы ничего.
     for key in old.allKeys():
         if key.startswith("ui/"):
             new.setValue(key, old.value(key))
     new.setValue("ui/migrated", True)
+    new.sync()
 
 
 class MainWindow(QMainWindow):
@@ -980,8 +986,7 @@ class MainWindow(QMainWindow):
             self.kb_window.equipment_applied.connect(
                 self._apply_library_equipment)
             # Задача 11 (сессия 13): запомненные размер/положение окна БД
-            from PySide6.QtCore import QSettings
-            geo = QSettings().value("ui/kb_geometry")
+            geo = _as.read_value("ui/kb_geometry")
             if geo is not None:
                 self.kb_window.restoreGeometry(geo)
         self._update_kb_apply_hint()
@@ -1048,8 +1053,7 @@ class MainWindow(QMainWindow):
             self._doc_host.show()
             # Задача 11 (сессия 13): запомненные размер/положение pop-out
             # окна (авто-открытия при старте НЕТ – только память)
-            from PySide6.QtCore import QSettings
-            geo = QSettings().value("ui/doc_geometry")
+            geo = _as.read_value("ui/doc_geometry")
             if geo is not None:
                 self.doc_window.restoreGeometry(geo)
         self.doc_window.show()
@@ -1065,10 +1069,9 @@ class MainWindow(QMainWindow):
     def _on_doc_window_closed(self) -> None:
         # Задача 11 (сессия 13): пока окно живо (closeEvent → closed →
         # сюда), запоминаем его размер/положение для следующего открытия
-        from PySide6.QtCore import QSettings
         if self.doc_window is not None:
-            QSettings().setValue("ui/doc_geometry",
-                                 self.doc_window.saveGeometry())
+            _as.write_value("ui/doc_geometry",
+                            self.doc_window.saveGeometry())
         # вернуть панель в скрытый хост главного окна
         self._doc_host.setParent(self)
         self._doc_host.hide()
@@ -1401,8 +1404,7 @@ class MainWindow(QMainWindow):
         папка проекта → Рабочий стол». Сессия 19 (Задача 1, LOCKED):
         экспорт в DOCX больше НЕ использует этот ключ, у него своя
         память export/last_dir (_export_dir_hint)."""
-        from PySide6.QtCore import QSettings
-        last = str(QSettings().value("ui/last_dir", "") or "")
+        last = str(_as.read_value("ui/last_dir", "") or "")
         if last and Path(last).is_dir():
             return last
         return self._project_dir_or_desktop()
@@ -1411,19 +1413,17 @@ class MainWindow(QMainWindow):
         """Задача 12: запомнить папку успешного сохранения/открытия
         ПРОЕКТА (ключ ui/last_dir). Экспорт – только export/last_dir
         (Задача 1, сессия 19), иначе отчет уводил бы «Открыть проект»
-        в папку отчетов."""
-        from PySide6.QtCore import QSettings
+        в папку отчетов. Запись сразу уходит на диск (sync) – сессия 20."""
         d = os.path.dirname(str(path))
         if d:
-            QSettings().setValue("ui/last_dir", d)
+            _as.write_value("ui/last_dir", d)
 
     def _export_dir_hint(self) -> str:
         """Задача 1 (сессия 19, LOCKED): папка предзаполнения экспорта
         DOCX – собственный ключ export/last_dir (исходники проектов и
         отчеты живут в РАЗНЫХ папках), фолбэк – папка проекта →
         Рабочий стол."""
-        from PySide6.QtCore import QSettings
-        last = str(QSettings().value("export/last_dir", "") or "")
+        last = str(_as.read_value("export/last_dir", "") or "")
         if last and Path(last).is_dir():
             return last
         return self._project_dir_or_desktop()
@@ -1431,11 +1431,16 @@ class MainWindow(QMainWindow):
     def _remember_export_dir(self, path: str) -> None:
         """Задача 1 (сессия 19, LOCKED): запомнить папку отчета – после
         УСПЕШНОГО экспорта и после выбора пути в «Обзор…» (в т. ч. если
-        диалог затем отменен). Ключ ui/last_dir не трогает."""
-        from PySide6.QtCore import QSettings
+        диалог затем отменен). Ключ ui/last_dir не трогает.
+
+        Сессия 20 (п.3): запись идёт через `app_settings.write_value`, то
+        есть с немедленным `sync()` в ЯВНЫЙ INI-файл. Прежняя схема
+        (реестр + кэш Qt до разрушения последнего QSettings) на машине
+        заказчика теряла значения: перезапуск не помнил ни папку экспорта,
+        ни размеры окон."""
         d = os.path.dirname(os.path.abspath(str(path)))
         if d:
-            QSettings().setValue("export/last_dir", d)
+            _as.write_value("export/last_dir", d)
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -1676,15 +1681,20 @@ class MainWindow(QMainWindow):
         """Задача 1 (сессия 18): единая точка сохранения состояния
         интерфейса (геометрия окна + пропорции главного сплиттера) –
         вызывается из closeEvent И по дебаунсу splitterMoved, чтобы
-        размеры панелей переживала любой путь выхода."""
-        from PySide6.QtCore import QSettings
-        st = QSettings()
+        размеры панелей переживала любой путь выхода.
+
+        Сессия 20 (п.3): хранилище – явный INI (`app_settings`), и
+        сохранение завершается `sync()`. Без sync Qt вправе держать
+        значения в кэше до разрушения последнего объекта QSettings, а
+        завершённый «сверху» процесс их терял – именно так на машине
+        заказчика перестали запоминаться окна и папки."""
+        st = _as.settings()
         st.setValue("ui/geometry", self.saveGeometry())
         st.setValue("ui/splitter", self.splitter.saveState())
+        st.sync()
 
     def _restore_ui(self) -> None:
-        from PySide6.QtCore import QSettings
-        st = QSettings()
+        st = _as.settings()
         geo = st.value("ui/geometry")
         if geo is not None:
             self.restoreGeometry(geo)

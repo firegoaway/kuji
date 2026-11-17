@@ -48,6 +48,21 @@ def keys_debug_enabled() -> bool:
     return _DEBUG_KEYS
 
 
+def debug_line(text: str) -> None:
+    """Одна произвольная строка в тот же qa_artifacts\\key_debug.log
+    (KUJI_DEBUG_KEYS=1). Нужна НЕ про клавиши: например, диагностика
+    хранилища настроек на старте (сессия 20). Молчит, если лог выключен,
+    и никогда не роняет запуск."""
+    if not keys_debug_enabled():
+        return
+    try:
+        _DEBUG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_DEBUG_PATH, "a", encoding="utf-8") as fh:
+            fh.write(f"[{time.strftime('%H:%M:%S')}] {text}\n")
+    except Exception:            # noqa: BLE001 – лог не важнее приложения
+        pass
+
+
 def _mods_text(mods) -> str:
     parts = []
     if mods & Qt.KeyboardModifier.ControlModifier:
