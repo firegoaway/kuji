@@ -1,0 +1,2177 @@
+{
+  "meta": {
+    "title": "База знаний для построения логических деревьев событий (FTA + ETA)",
+    "methodology": "Методика МЧС России от 26.06.2024 № 533 «Об определении расчетных величин пожарного риска на производственных объектах»; ГОСТ 12.1.004-91 (прил. 3)",
+    "version": "6.2",
+    "default_cutoff": 1e-08,
+    "norm_refs": [
+      {
+        "id": "m533",
+        "title": "Приказ МЧС России от 26.06.2024 № 533"
+      },
+      {
+        "id": "gost-12004",
+        "title": "ГОСТ 12.1.004-91 «Пожарная безопасность. Общие требования»"
+      },
+      {
+        "id": "fz123",
+        "title": "Федеральный закон от 22.07.2008 № 123-ФЗ"
+      },
+      {
+        "id": "so-153",
+        "title": "СО 153-34.21.122-2003 (молниезащита)"
+      }
+    ]
+  },
+  "scenario_types": [
+    {
+      "id": "tgm",
+      "title": "Сценарий пожара ТГМ",
+      "substance": "ТГМ",
+      "fire_node_title": "Возникновение пожара",
+      "medium": null
+    },
+    {
+      "id": "gg",
+      "title": "Сценарий пожара ГГ",
+      "substance": "ГГ",
+      "fire_node_title": "Возникновение пожара",
+      "medium": "gas"
+    },
+    {
+      "id": "gzh",
+      "title": "Сценарий пожара ГЖ",
+      "substance": "ГЖ",
+      "fire_node_title": "Возникновение пожара",
+      "medium": "liquid"
+    },
+    {
+      "id": "lvzh",
+      "title": "Сценарий пожара ЛВЖ",
+      "substance": "ЛВЖ",
+      "fire_node_title": "Возникновение пожара",
+      "medium": "twophase"
+    },
+    {
+      "id": "dust",
+      "title": "Сценарий пожара Пыли",
+      "substance": "Пыль",
+      "fire_node_title": "Возникновение пожара",
+      "medium": "dust"
+    }
+  ],
+  "gs_causes": [
+    {
+      "id": "gs-tgm-surface",
+      "title": "Пожар по поверхности (постоянное наличие ТГМ)",
+      "kind": "p13",
+      "applies": [
+        "tgm"
+      ],
+      "site_kinds": [
+        "area"
+      ],
+      "source": "src-1"
+    },
+    {
+      "id": "gs-vessel-5",
+      "kind": "p11",
+      "title": "Аппарат (сосуд) под давлением: разгерметизация, отверстие 5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 4e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-vessel-12.5",
+      "kind": "p11",
+      "title": "Аппарат (сосуд) под давлением: разгерметизация, отверстие 12,5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 1e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-vessel-25",
+      "kind": "p11",
+      "title": "Аппарат (сосуд) под давлением: разгерметизация, отверстие 25 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 6.2e-06,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-vessel-50",
+      "kind": "p11",
+      "title": "Аппарат (сосуд) под давлением: разгерметизация, отверстие 50 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 3.8e-06,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-vessel-100",
+      "kind": "p11",
+      "title": "Аппарат (сосуд) под давлением: разгерметизация, отверстие 100 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 1.7e-06,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-vessel-rupt",
+      "kind": "p11",
+      "title": "Аппарат (сосуд) под давлением: разгерметизация, полное разрушение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 3e-07,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-reactor-5",
+      "kind": "p11",
+      "title": "Химический реактор: разгерметизация, отверстие 5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 4e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-reactor-12.5",
+      "kind": "p11",
+      "title": "Химический реактор: разгерметизация, отверстие 12,5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 1e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-reactor-25",
+      "kind": "p11",
+      "title": "Химический реактор: разгерметизация, отверстие 25 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 6.2e-06,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-reactor-50",
+      "kind": "p11",
+      "title": "Химический реактор: разгерметизация, отверстие 50 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 3.8e-06,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-reactor-rupt",
+      "kind": "p11",
+      "title": "Химический реактор: разгерметизация, полное разрушение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 1.5e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-pump-5",
+      "kind": "p11",
+      "title": "Насос центробежный (одинарное торцевое уплотнение): разгерметизация, отверстие 5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0043,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-pump-12.5",
+      "kind": "p11",
+      "title": "Насос центробежный (одинарное торцевое уплотнение): разгерметизация, отверстие 12,5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.00061,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-pump-25",
+      "kind": "p11",
+      "title": "Насос центробежный (одинарное торцевое уплотнение): разгерметизация, отверстие 25 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.00051,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-pump-50",
+      "kind": "p11",
+      "title": "Насос центробежный (одинарное торцевое уплотнение): разгерметизация, отверстие 50 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0002,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-pump-rupt",
+      "kind": "p11",
+      "title": "Насос центробежный (одинарное торцевое уплотнение): разгерметизация, полное разрушение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0001,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-compressor-5",
+      "kind": "p11",
+      "title": "Компрессор центробежный: разгерметизация, отверстие 5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.011,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-compressor-12.5",
+      "kind": "p11",
+      "title": "Компрессор центробежный: разгерметизация, отверстие 12,5 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0013,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-compressor-25",
+      "kind": "p11",
+      "title": "Компрессор центробежный: разгерметизация, отверстие 25 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.00039,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-compressor-50",
+      "kind": "p11",
+      "title": "Компрессор центробежный: разгерметизация, отверстие 50 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.00013,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-compressor-rupt",
+      "kind": "p11",
+      "title": "Компрессор центробежный: разгерметизация, полное разрушение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0001,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-big-25",
+      "kind": "p11",
+      "title": "Резервуар ЛВЖ/ГЖ атмосферный, единичный объем ≥ 450 м³: разгерметизация, отверстие 25 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 8.8e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-big-100",
+      "kind": "p11",
+      "title": "Резервуар ЛВЖ/ГЖ атмосферный, единичный объем ≥ 450 м³: разгерметизация, отверстие 100 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 1.2e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-big-rupt",
+      "kind": "p11",
+      "title": "Резервуар ЛВЖ/ГЖ атмосферный, единичный объем ≥ 450 м³: разгерметизация, полное разрушение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 5e-06,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-small-25",
+      "kind": "p11",
+      "title": "Резервуар ЛВЖ/ГЖ атмосферный, единичный объем < 450 м³: разгерметизация, отверстие 25 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0005,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-small-100",
+      "kind": "p11",
+      "title": "Резервуар ЛВЖ/ГЖ атмосферный, единичный объем < 450 м³: разгерметизация, отверстие 100 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 5e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-small-rupt",
+      "kind": "p11",
+      "title": "Резервуар ЛВЖ/ГЖ атмосферный, единичный объем < 450 м³: разгерметизация, полное разрушение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 8e-06,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-iso-vapor",
+      "kind": "p11",
+      "title": "Одностенный изотермический резервуар СГ: разгерметизация, отверстие vapor мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0002,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-iso-150",
+      "kind": "p11",
+      "title": "Одностенный изотермический резервуар СГ: разгерметизация, отверстие 150 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0001,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-iso-500",
+      "kind": "p11",
+      "title": "Одностенный изотермический резервуар СГ: разгерметизация, отверстие 500 мм",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 8e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-iso-rupt",
+      "kind": "p11",
+      "title": "Одностенный изотермический резервуар СГ: разгерметизация, полное разрушение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 4e-05,
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-float-ring",
+      "title": "Резервуар с плавающей крышей: пожар в кольцевом зазоре",
+      "kind": "direct",
+      "applies": [
+        "gzh",
+        "lvzh"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.0046,
+      "direct_fire": "ft-pool",
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-float-full",
+      "title": "Резервуар с плавающей крышей: пожар по всей поверхности",
+      "kind": "direct",
+      "applies": [
+        "gzh",
+        "lvzh"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 0.00093,
+      "direct_fire": "ft-pool",
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-fixed-breath",
+      "title": "Резервуар со стационарной крышей: пожар на дыхательной арматуре",
+      "kind": "direct",
+      "applies": [
+        "gzh",
+        "lvzh"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 9e-05,
+      "direct_fire": "ft-pool",
+      "source": "src-2"
+    },
+    {
+      "id": "gs-tank-fixed-full",
+      "title": "Резервуар со стационарной крышей: пожар по всей поверхности",
+      "kind": "direct",
+      "applies": [
+        "gzh",
+        "lvzh"
+      ],
+      "site_kinds": [
+        "apparatus"
+      ],
+      "q": 9e-05,
+      "direct_fire": "ft-pool",
+      "source": "src-2"
+    },
+    {
+      "id": "gs-pipe-50-small",
+      "kind": "p12",
+      "title": "Трубопровод D50: утечка – малая (отверстие 12,5 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 5.7e-06,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-50-mid",
+      "kind": "p12",
+      "title": "Трубопровод D50: утечка – средняя (отверстие 25 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 2.4e-06,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-50-rupt",
+      "kind": "p12",
+      "title": "Трубопровод D50: утечка – разрыв",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.4e-06,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-100-small",
+      "kind": "p12",
+      "title": "Трубопровод D100: утечка – малая (отверстие 12,5 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 2.8e-06,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-100-mid",
+      "kind": "p12",
+      "title": "Трубопровод D100: утечка – средняя (отверстие 25 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.2e-06,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-100-big",
+      "kind": "p12",
+      "title": "Трубопровод D100: утечка – значительная (отверстие 50 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 4.7e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-100-rupt",
+      "kind": "p12",
+      "title": "Трубопровод D100: утечка – разрыв",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 2.4e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-150-small",
+      "kind": "p12",
+      "title": "Трубопровод D150: утечка – малая (отверстие 12,5 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.9e-06,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-150-mid",
+      "kind": "p12",
+      "title": "Трубопровод D150: утечка – средняя (отверстие 25 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 7.9e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-150-big",
+      "kind": "p12",
+      "title": "Трубопровод D150: утечка – значительная (отверстие 50 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 3.1e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-150-big100",
+      "kind": "p12",
+      "title": "Трубопровод D150: утечка – большая (отверстие 100 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.3e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-150-rupt",
+      "kind": "p12",
+      "title": "Трубопровод D150: утечка – разрыв",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 2.5e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-250-small",
+      "kind": "p12",
+      "title": "Трубопровод D250: утечка – малая (отверстие 12,5 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.1e-06,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-250-mid",
+      "kind": "p12",
+      "title": "Трубопровод D250: утечка – средняя (отверстие 25 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 4.7e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-250-big",
+      "kind": "p12",
+      "title": "Трубопровод D250: утечка – значительная (отверстие 50 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.9e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-250-big100",
+      "kind": "p12",
+      "title": "Трубопровод D250: утечка – большая (отверстие 100 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 7.8e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-250-rupt",
+      "kind": "p12",
+      "title": "Трубопровод D250: утечка – разрыв",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.5e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-600-small",
+      "kind": "p12",
+      "title": "Трубопровод D600: утечка – малая (отверстие 12,5 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 4.7e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-600-mid",
+      "kind": "p12",
+      "title": "Трубопровод D600: утечка – средняя (отверстие 25 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 2e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-600-big",
+      "kind": "p12",
+      "title": "Трубопровод D600: утечка – значительная (отверстие 50 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 7.9e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-600-big100",
+      "kind": "p12",
+      "title": "Трубопровод D600: утечка – большая (отверстие 100 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 3.4e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-600-rupt",
+      "kind": "p12",
+      "title": "Трубопровод D600: утечка – разрыв",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 6.4e-09,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-900-small",
+      "kind": "p12",
+      "title": "Трубопровод D900: утечка – малая (отверстие 12,5 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 3.1e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-900-mid",
+      "kind": "p12",
+      "title": "Трубопровод D900: утечка – средняя (отверстие 25 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.3e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-900-big",
+      "kind": "p12",
+      "title": "Трубопровод D900: утечка – значительная (отверстие 50 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 5.2e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-900-big100",
+      "kind": "p12",
+      "title": "Трубопровод D900: утечка – большая (отверстие 100 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 2.2e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-900-rupt",
+      "kind": "p12",
+      "title": "Трубопровод D900: утечка – разрыв",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 4.2e-09,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-1200-small",
+      "kind": "p12",
+      "title": "Трубопровод D1200: утечка – малая (отверстие 12,5 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 2.4e-07,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-1200-mid",
+      "kind": "p12",
+      "title": "Трубопровод D1200: утечка – средняя (отверстие 25 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 9.8e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-1200-big",
+      "kind": "p12",
+      "title": "Трубопровод D1200: утечка – значительная (отверстие 50 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 3.9e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-1200-big100",
+      "kind": "p12",
+      "title": "Трубопровод D1200: утечка – большая (отверстие 100 мм)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 1.7e-08,
+      "source": "src-3"
+    },
+    {
+      "id": "gs-pipe-1200-rupt",
+      "kind": "p12",
+      "title": "Трубопровод D1200: утечка – разрыв",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "site_kinds": [
+        "linear"
+      ],
+      "q_per_m": 3.2e-09,
+      "source": "src-3"
+    }
+  ],
+  "iz_causes": [
+    {
+      "id": "iz-lamp",
+      "title": "Отказ осветительных приборов (лампы накаливания)",
+      "lam": 3.2e-05,
+      "source": "src-4",
+      "electrical": true
+    },
+    {
+      "id": "iz-cable",
+      "title": "Отказ кабельных линий",
+      "lam": 2.2e-06,
+      "source": "src-4",
+      "electrical": true
+    },
+    {
+      "id": "iz-uzdo",
+      "title": "Отказ защитных устройств отключения (УЗО)",
+      "lam": 1e-06,
+      "source": "src-4",
+      "electrical": true
+    },
+    {
+      "id": "iz-human",
+      "title": "Человеческий фактор (при работе с оборудованием)",
+      "lam": 1e-06,
+      "source": "src-4"
+    },
+    {
+      "id": "iz-fork",
+      "title": "Отказ элементов питания погрузчиков",
+      "lam": 2.5e-05,
+      "source": "src-4",
+      "electrical": true
+    },
+    {
+      "id": "iz-spark",
+      "title": "Искрообразующие элементы фасовочной аппаратуры",
+      "lam": 2.5e-05,
+      "source": "src-4",
+      "electrical": true
+    },
+    {
+      "id": "iz-pump",
+      "title": "Отказ насосов с машинным приводом",
+      "lam": 8.74e-06,
+      "source": "src-4"
+    },
+    {
+      "id": "iz-valve",
+      "title": "Отказ шариковых клапанов",
+      "lam": 4.6e-06,
+      "source": "src-4"
+    },
+    {
+      "id": "iz-servo",
+      "title": "Отказ сервоклапанов",
+      "lam": 3e-05,
+      "source": "src-4",
+      "electrical": true
+    },
+    {
+      "id": "iz-bearing",
+      "title": "Отказ шариковых подшипников",
+      "lam": 6.5e-07,
+      "source": "src-4"
+    },
+    {
+      "id": "iz-spring",
+      "title": "Отказ пружин",
+      "lam": 1.125e-07,
+      "source": "src-4"
+    },
+    {
+      "id": "iz-clamp",
+      "title": "Отказ зажимов",
+      "lam": 5e-10,
+      "source": "src-4"
+    },
+    {
+      "id": "iz-static",
+      "title": "Статическое электричество (перемещение веществ, заряды)",
+      "lam": 5.3e-05,
+      "source": "src-4"
+    },
+    {
+      "id": "iz-lightning",
+      "title": "Удар молнии",
+      "mode": "lightning",
+      "source": "src-5"
+    },
+    {
+      "id": "iz-hot",
+      "title": "Выход вещества, нагретого до T_самовоспл (действующий источник зажигания)",
+      "p": 1.0,
+      "source": "src-6"
+    }
+  ],
+  "fire_types": [
+    {
+      "id": "ft-tgm-surface",
+      "title": "Пожар по поверхности",
+      "applies": [
+        "tgm"
+      ],
+      "p_key": null,
+      "p": 1.0
+    },
+    {
+      "id": "ft-jet",
+      "title": "Факельное горение",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh"
+      ],
+      "p_key": "instant",
+      "media": [
+        "gas",
+        "twophase"
+      ]
+    },
+    {
+      "id": "ft-pool",
+      "title": "Пожар пролива",
+      "applies": [
+        "gzh",
+        "lvzh"
+      ],
+      "p_key": "instant|delayed",
+      "media": [
+        "liquid"
+      ]
+    },
+    {
+      "id": "ft-flash",
+      "title": "Пожар-вспышка",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh"
+      ],
+      "p_key": "delayed",
+      "media": [
+        "gas",
+        "twophase"
+      ]
+    },
+    {
+      "id": "ft-vce",
+      "title": "Сгорание (взрыв) топливовоздушной смеси",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "p_key": "pressure",
+      "media": [
+        "gas",
+        "twophase",
+        "liquid"
+      ]
+    },
+    {
+      "id": "ft-fireball",
+      "title": "Огненный шар (диффузионное горение)",
+      "applies": [
+        "gg",
+        "gzh",
+        "lvzh",
+        "dust"
+      ],
+      "switch": true,
+      "q": 2.5e-05,
+      "source": "Приказ МЧС России № 533, прил. № 1, п. 5"
+    },
+    {
+      "id": "ft-dust-defl",
+      "title": "Сгорание (взрыв) пылевоздушной смеси – дефлаграция",
+      "applies": [
+        "dust"
+      ],
+      "p_key": null,
+      "p": 1.0,
+      "source": "Приказ МЧС России № 533, прил. № 3 (классы 2–6)"
+    },
+    {
+      "id": "ft-dust-det",
+      "title": "Сгорание (взрыв) пылевоздушной смеси – детонация",
+      "applies": [
+        "dust"
+      ],
+      "p_key": null,
+      "p": 1.0,
+      "source": "Приказ МЧС России № 533, прил. № 3 (класс 1)"
+    }
+  ],
+  "p21": {
+    "small": {
+      "gas": [
+        0.005,
+        0.005,
+        0.08
+      ],
+      "twophase": [
+        0.005,
+        0.005,
+        0.08
+      ],
+      "liquid": [
+        0.005,
+        0.005,
+        0.05
+      ]
+    },
+    "mid": {
+      "gas": [
+        0.035,
+        0.036,
+        0.24
+      ],
+      "twophase": [
+        0.035,
+        0.036,
+        0.24
+      ],
+      "liquid": [
+        0.015,
+        0.015,
+        0.05
+      ]
+    },
+    "big": {
+      "gas": [
+        0.15,
+        0.176,
+        0.6
+      ],
+      "twophase": [
+        0.15,
+        0.176,
+        0.6
+      ],
+      "liquid": [
+        0.04,
+        0.042,
+        0.05
+      ]
+    },
+    "rupt": {
+      "gas": [
+        0.2,
+        0.24,
+        0.6
+      ],
+      "twophase": [
+        0.2,
+        0.24,
+        0.6
+      ],
+      "liquid": [
+        0.05,
+        0.061,
+        0.1
+      ]
+    }
+  },
+  "flow_titles": {
+    "small": "массовый расход истечения < 1 кг/с",
+    "mid": "массовый расход истечения 1–50 кг/с",
+    "big": "массовый расход истечения > 50 кг/с",
+    "rupt": "полный разрыв"
+  },
+  "p13": [
+    {
+      "id": "p13-power",
+      "title": "Электростанции",
+      "a1": 2.2e-05
+    },
+    {
+      "id": "p13-chem",
+      "title": "Склады химической продукции",
+      "a1": 1.2e-05
+    },
+    {
+      "id": "p13-multi",
+      "title": "Склады многономенклатурной продукции",
+      "a1": 9e-05
+    },
+    {
+      "id": "p13-tools",
+      "title": "Инструментально-механические цеха",
+      "a1": 6e-06
+    },
+    {
+      "id": "p13-rubber",
+      "title": "Цеха по обработке синтетического каучука и искусственных волокон",
+      "a1": 2.7e-05
+    },
+    {
+      "id": "p13-cast",
+      "title": "Литейные и плавильные цеха",
+      "a1": 1.9e-05
+    },
+    {
+      "id": "p13-meat",
+      "title": "Цеха по переработке мясных и рыбных продуктов",
+      "a1": 1.5e-05
+    },
+    {
+      "id": "p13-rolling",
+      "title": "Цеха горячей прокатки металлов",
+      "a1": 1.9e-05
+    },
+    {
+      "id": "p13-textile",
+      "title": "Текстильные производства",
+      "a1": 1.5e-05
+    },
+    {
+      "id": "p13-office",
+      "title": "Административные здания производственных объектов",
+      "a1": 1.2e-05
+    }
+  ],
+  "p14": [
+    {
+      "id": "p14-food",
+      "title": "Пищевая, табачная промышленность",
+      "a": 0.0011,
+      "b": 0.6
+    },
+    {
+      "id": "p14-chem",
+      "title": "Переработка горючих веществ, химическая промышленность",
+      "a": 0.0069,
+      "b": 0.46
+    },
+    {
+      "id": "p14-electro",
+      "title": "Размещение электротехнического оборудования",
+      "a": 0.0061,
+      "b": 0.59
+    },
+    {
+      "id": "p14-transport",
+      "title": "Обслуживание транспортных средств",
+      "a": 0.00012,
+      "b": 0.86
+    },
+    {
+      "id": "p14-textile",
+      "title": "Текстильная промышленность",
+      "a": 0.0075,
+      "b": 0.35
+    },
+    {
+      "id": "p14-print",
+      "title": "Полиграфические предприятия, издательское дело",
+      "a": 0.0007,
+      "b": 0.91
+    },
+    {
+      "id": "p14-office",
+      "title": "Административные здания (помещения) производственных объектов",
+      "a": 6e-05,
+      "b": 0.9
+    },
+    {
+      "id": "p14-other",
+      "title": "Другие виды зданий производственных объектов",
+      "a": 0.0084,
+      "b": 0.41
+    }
+  ],
+  "equipment_templates": [
+    {
+      "id": "eq-tgm-warehouse",
+      "title": "Складской участок с ТГМ",
+      "scenario_type": "tgm",
+      "site_type": "area",
+      "gs_causes": [
+        "gs-tgm-surface"
+      ],
+      "iz_causes": [
+        "iz-lamp",
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-fork",
+        "iz-spark"
+      ],
+      "category": "ТГМ"
+    },
+    {
+      "id": "eq-tgm-room",
+      "title": "Производственное помещение с ТГМ",
+      "scenario_type": "tgm",
+      "site_type": "area",
+      "gs_causes": [
+        "gs-tgm-surface"
+      ],
+      "iz_causes": [
+        "iz-lamp",
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-pump",
+        "iz-spark"
+      ],
+      "category": "ТГМ"
+    },
+    {
+      "id": "eq-vessel-gg",
+      "title": "Аппарат (сосуд) под давлением – газ",
+      "scenario_type": "gg",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-vessel-5",
+        "gs-vessel-12.5",
+        "gs-vessel-25",
+        "gs-vessel-50",
+        "gs-vessel-100",
+        "gs-vessel-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-static",
+        "iz-lightning"
+      ],
+      "category": "ГГ"
+    },
+    {
+      "id": "eq-vessel-gzh",
+      "title": "Аппарат (сосуд) под давлением – горючая жидкость",
+      "scenario_type": "gzh",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-vessel-5",
+        "gs-vessel-12.5",
+        "gs-vessel-25",
+        "gs-vessel-50",
+        "gs-vessel-100",
+        "gs-vessel-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-pump",
+        "iz-spark"
+      ],
+      "category": "ГЖ"
+    },
+    {
+      "id": "eq-vessel-lvzh",
+      "title": "Аппарат (сосуд) под давлением – ЛВЖ",
+      "scenario_type": "lvzh",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-vessel-5",
+        "gs-vessel-12.5",
+        "gs-vessel-25",
+        "gs-vessel-50",
+        "gs-vessel-100",
+        "gs-vessel-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-static",
+        "iz-spark"
+      ],
+      "category": "ЛВЖ"
+    },
+    {
+      "id": "eq-reactor",
+      "title": "Химический реактор",
+      "scenario_type": "gg",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-reactor-5",
+        "gs-reactor-12.5",
+        "gs-reactor-25",
+        "gs-reactor-50",
+        "gs-reactor-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-static"
+      ],
+      "category": "ГГ"
+    },
+    {
+      "id": "eq-pump-lvzh",
+      "title": "Насос центробежный (ЛВЖ)",
+      "scenario_type": "lvzh",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-pump-5",
+        "gs-pump-12.5",
+        "gs-pump-25",
+        "gs-pump-50",
+        "gs-pump-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-pump",
+        "iz-spark"
+      ],
+      "category": "ЛВЖ"
+    },
+    {
+      "id": "eq-pump-gzh",
+      "title": "Насос центробежный (ГЖ)",
+      "scenario_type": "gzh",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-pump-5",
+        "gs-pump-12.5",
+        "gs-pump-25",
+        "gs-pump-50",
+        "gs-pump-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-pump"
+      ],
+      "category": "ГЖ"
+    },
+    {
+      "id": "eq-compressor",
+      "title": "Компрессор центробежный (ГГ)",
+      "scenario_type": "gg",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-compressor-5",
+        "gs-compressor-12.5",
+        "gs-compressor-25",
+        "gs-compressor-50",
+        "gs-compressor-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-static"
+      ],
+      "category": "ГГ"
+    },
+    {
+      "id": "eq-tank-big",
+      "title": "Резервуар ЛВЖ/ГЖ ≥ 450 м³",
+      "scenario_type": "lvzh",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-tank-big-25",
+        "gs-tank-big-100",
+        "gs-tank-big-rupt",
+        "gs-tank-fixed-breath",
+        "gs-tank-fixed-full"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-static",
+        "iz-lightning"
+      ],
+      "category": "ЛВЖ"
+    },
+    {
+      "id": "eq-tank-small",
+      "title": "Резервуар ЛВЖ/ГЖ < 450 м³",
+      "scenario_type": "lvzh",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-tank-small-25",
+        "gs-tank-small-100",
+        "gs-tank-small-rupt",
+        "gs-tank-fixed-breath",
+        "gs-tank-fixed-full"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-static"
+      ],
+      "category": "ЛВЖ"
+    },
+    {
+      "id": "eq-tank-iso",
+      "title": "Изотермический резервуар СГ",
+      "scenario_type": "gg",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-tank-iso-vapor",
+        "gs-tank-iso-150",
+        "gs-tank-iso-500",
+        "gs-tank-iso-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human",
+        "iz-static"
+      ],
+      "category": "ГГ"
+    },
+    {
+      "id": "eq-pipe-100",
+      "title": "Технологический трубопровод D100 (линейный объект)",
+      "scenario_type": "gg",
+      "site_type": "linear",
+      "gs_causes": [
+        "gs-pipe-100-small",
+        "gs-pipe-100-mid",
+        "gs-pipe-100-big",
+        "gs-pipe-100-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human"
+      ],
+      "category": "Трубопроводы"
+    },
+    {
+      "id": "eq-pipe-600",
+      "title": "Технологический трубопровод D600 (линейный объект)",
+      "scenario_type": "gg",
+      "site_type": "linear",
+      "gs_causes": [
+        "gs-pipe-600-small",
+        "gs-pipe-600-mid",
+        "gs-pipe-600-big",
+        "gs-pipe-600-big100",
+        "gs-pipe-600-rupt"
+      ],
+      "iz_causes": [
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human"
+      ],
+      "category": "Трубопроводы"
+    },
+    {
+      "id": "eq-filter-dust",
+      "title": "Рукавный фильтр (горючая пыль)",
+      "scenario_type": "dust",
+      "site_type": "apparatus",
+      "gs_causes": [
+        "gs-vessel-5",
+        "gs-vessel-12.5",
+        "gs-vessel-rupt"
+      ],
+      "iz_causes": [
+        "iz-static",
+        "iz-cable",
+        "iz-uzdo",
+        "iz-human"
+      ],
+      "category": "Пыль"
+    },
+    {
+      "id": "eq-outdoor-gas",
+      "title": "Наружная газовая установка (ГГ)",
+      "scenario_type": "gg",
+      "site_type": "outdoor",
+      "gs_causes": [
+        "gs-vessel-12.5",
+        "gs-vessel-25",
+        "gs-vessel-50",
+        "gs-vessel-rupt"
+      ],
+      "iz_causes": [
+        "iz-static",
+        "iz-lightning",
+        "iz-cable"
+      ],
+      "category": "Наружные"
+    }
+  ],
+  "property_modifiers": [
+    {
+      "id": "pm-drain",
+      "pedal": "drain",
+      "title": "Аварийный дренаж / слив",
+      "category": "Локализация",
+      "type": "barrier_pfd",
+      "applies": [
+        "equipment"
+      ],
+      "p_success": 0.95,
+      "stage_level": 1,
+      "formula": "F_вых = F_вх · k_др, k_др = 0,05",
+      "source": "src-7",
+      "confidence": "normative-anchored",
+      "notes": "снижение частоты развития аварии при устройстве аварийного слива. Принятая вероятность срабатывания систем блокирования и аварийного сброса – 0,95",
+      "target": "gs",
+      "tooltip": "Аварийный слив сокращает количество горючего вещества, участвующего в аварии. Вероятность срабатывания систем блокирования и аварийного сброса принята 0,95 (ГОСТ Р 12.3.047-98, прил. Э, п. Э.4.5)."
+    },
+    {
+      "id": "pm-venting",
+      "pedal": "venting",
+      "title": "Вытяжная / аварийная вентиляция",
+      "category": "Локализация",
+      "type": "barrier_pfd",
+      "applies": [
+        "room",
+        "area",
+        "equipment"
+      ],
+      "stage_level": 1,
+      "formula": "P_ост = 1/(A·T + 1)",
+      "source": "src-8",
+      "confidence": "engineering-estimate",
+      "notes": "снижение условной вероятности сохранения взрывоопасной концентрации при работе аварийной вентиляции. Вероятностная трактовка делителя массы – инженерная оценка",
+      "tooltip": "Аварийная вентиляция уменьшает массу поступивших паров и газов в объеме помещения. Делитель массы A·T + 1 принят по ГОСТ Р 12.3.047-98 (прил. А, п. А.2.5, формула А.13). Кратность снижения массы консервативно приравнена к кратности снижения вероятности образования горючей среды.",
+      "target": "room"
+    },
+    {
+      "id": "pm-leak-detectors",
+      "pedal": "leak_detectors",
+      "title": "Датчики утечки / газоанализаторы",
+      "category": "Обнаружение и тушение",
+      "type": "barrier_pfd",
+      "applies": [
+        "equipment"
+      ],
+      "p_success": 0.8,
+      "stage_level": 2,
+      "formula": "F_вых = F_вх · PFD, PFD = 0,2",
+      "source": "src-9",
+      "confidence": "engineering-estimate",
+      "notes": "снижение частоты развития аварии при раннем обнаружении утечки. Вероятность обнаружения принята по нормативному аналогу для сигнализации загазованности",
+      "target": "gs",
+      "tooltip": "Газоанализаторы обеспечивают раннее обнаружение утечки до воспламенения и запуск противоаварийной защиты. Вероятность обнаружения – по аналогу из табл. П2.2 прил. № 2 к Приказу МЧС России № 533."
+    },
+    {
+      "id": "pm-vibro",
+      "pedal": "vibro_control",
+      "title": "Контроль температуры / вибрации",
+      "category": "Обнаружение и тушение",
+      "type": "lambda_k",
+      "applies": [
+        "equipment"
+      ],
+      "k": 0.7,
+      "formula": "λ_итог = λ_баз · k, k = 0,7",
+      "source": "src-10",
+      "confidence": "engineering-estimate",
+      "notes": "снижение частоты отказов вращающегося оборудования при непрерывном контроле технического состояния. Значение коэффициента – инженерная оценка",
+      "tooltip": "Непрерывный мониторинг температуры и вибрации выявляет деградационные отказы на ранней стадии и позволяет перевести оборудование в плановый останов. Снижение частоты отказов учитывается коэффициентом 0,7 как инженерная оценка. Требования к контролю нагрева узлов трения – ГОСТ 12.1.004-91, п. 7.9.",
+      "target": "iz"
+    },
+    {
+      "id": "pm-reserve",
+      "pedal": "reserve",
+      "title": "Резервирование противоаварийной защиты",
+      "category": "Надёжность",
+      "type": "voting",
+      "applies": [
+        "equipment"
+      ],
+      "formula": "1oo2: PFD_сист = PFD². 2oo3: PFD_сист = 3·PFD² − 2·PFD³",
+      "source": "src-11",
+      "confidence": "normative",
+      "notes": "пересчет вероятности отказа по запросу (PFD) при резервировании каналов защиты. Схема 1 из 2 – защита отказывает только при отказе обоих каналов (квадрат вероятности отказа по запросу). Схема 2 из 3 – срабатывание по большинству каналов (три квадрата минус два куба той же вероятности)",
+      "target": "gs",
+      "tooltip": "Резервирование каналов противоаварийной защиты снижает вероятность отказа по запросу (PFD). Схема 1 из 2 отказывает только при отказе обоих каналов. Схема 2 из 3 срабатывает по большинству каналов. Формулы – по ГОСТ Р МЭК 61508-6-2012, прил. B, п. B.3.2.2."
+    },
+    {
+      "id": "pm-wear",
+      "pedal": "wear",
+      "title": "Износ (превышен срок службы)",
+      "category": "Надёжность",
+      "type": "lambda_k",
+      "applies": [
+        "equipment"
+      ],
+      "k": 2.0,
+      "formula": "λ_итог = λ_баз · k, k = 2…5",
+      "source": "src-12",
+      "confidence": "engineering-estimate",
+      "notes": "повышение частоты отказов при эксплуатации оборудования за пределами назначенного срока службы. Интенсивность отказов на участке износа возрастает, значение коэффициента – инженерная оценка",
+      "tooltip": "При превышении назначенного срока службы оборудование переходит в фазу интенсивного износа, и частота аварийных отказов повышается коэффициентом от 2 до 5 (по умолчанию 2). Непостоянство интенсивности отказов на жизненном цикле – ГОСТ 27.002-2015.",
+      "target": "gs"
+    },
+    {
+      "id": "pm-hermetic",
+      "pedal": "hermetic",
+      "title": "Герметичное исполнение / антикоррозионная защита",
+      "category": "Прочее",
+      "type": "lambda_k",
+      "applies": [
+        "equipment"
+      ],
+      "k": 0.5,
+      "formula": "λ_итог = λ_баз · k, k = 0,5",
+      "source": "src-13",
+      "confidence": "engineering-estimate",
+      "notes": "снижение частоты разгерметизации при герметичных соединениях и улучшенной защите от коррозии. Значение коэффициента – инженерная оценка по диапазону нормативных аналогов",
+      "target": "gs",
+      "tooltip": "Герметичные и бесфланцевые соединения, двойные уплотнения и улучшенная защита от коррозии снижают частоту разгерметизации. Нормативные аналоги коэффициента для улучшенной защиты от коррозии – табл. П6.2 прил. № 6 к Приказу МЧС России № 533."
+    },
+    {
+      "id": "pm-exproof",
+      "pedal": "exproof",
+      "title": "Взрывозащищённое исполнение",
+      "category": "Прочее",
+      "type": "blocker",
+      "applies": [
+        "equipment"
+      ],
+      "formula": "λ_эл = 0",
+      "source": "src-14",
+      "confidence": "engineering-estimate",
+      "notes": "исключение электрических источников зажигания. Электрооборудование во взрывозащищенном исполнении не способно воспламенить окружающую среду",
+      "target": "iz"
+    },
+    {
+      "id": "pm-sil",
+      "pedal": "sil_paz",
+      "title": "ПАЗ по уровню полноты безопасности (SIL)",
+      "category": "Надёжность",
+      "type": "sil",
+      "applies": [
+        "equipment"
+      ],
+      "ranges": {
+        "1": [
+          0.01,
+          0.1
+        ],
+        "2": [
+          0.001,
+          0.01
+        ],
+        "3": [
+          0.0001,
+          0.001
+        ],
+        "4": [
+          1e-05,
+          0.0001
+        ]
+      },
+      "default_pfd": {
+        "1": 0.01,
+        "2": 0.001,
+        "3": 0.0001,
+        "4": 1e-05
+      },
+      "formula": "F_вых = F_вх · PFD",
+      "source": "src-15",
+      "confidence": "normative",
+      "notes": "снижение частоты развития аварии системой противоаварийной защиты. Вероятность отказа по запросу (PFD) принимается по уровню полноты безопасности (SIL), консервативно – верхняя граница диапазона. При резервировании каналов значение пересчитывается по схеме резервирования",
+      "tooltip": "Система противоаварийной защиты работает в режиме редких запросов. Ее эффективность оценивается вероятностью отказа по запросу (PFD) по уровню полноты безопасности (SIL) из табл. 2 ГОСТ Р МЭК 61508-1-2012. При отсутствии точных данных принимается верхняя граница диапазона.",
+      "target": "gs"
+    },
+    {
+      "id": "pm-ttest",
+      "pedal": "t_test",
+      "title": "Периодичность проверок защитных средств (T_ТО)",
+      "category": "Надёжность",
+      "type": "pfd_avg",
+      "applies": [
+        "equipment"
+      ],
+      "lambda_du_h": 1e-06,
+      "formula": "PFD_сист = max(PFD_SIL, PFD_avg). PFD_avg ≈ λ_DU · T_ТО/2",
+      "source": "src-16",
+      "confidence": "normative",
+      "notes": "средняя вероятность отказа по запросу (PFD) за интервал между проверками. В расчет принимается наибольшее из значений по уровню полноты безопасности (SIL) и по периодичности проверок",
+      "target": "gs"
+    },
+    {
+      "id": "pm-env-cat",
+      "title": "Категория взрывопожароопасной среды",
+      "category": "Технология",
+      "type": "env_category",
+      "applies": [
+        "equipment"
+      ],
+      "branches": {
+        "ГГ": [
+          "Мгновенное воспламенение",
+          "Отложенное воспламенение",
+          "Взрыв ТВС"
+        ],
+        "ЛВЖ": [
+          "Мгновенное воспламенение",
+          "Отложенное воспламенение",
+          "Пожар пролива"
+        ],
+        "ГЖ": [
+          "Мгновенное воспламенение",
+          "Пожар пролива"
+        ],
+        "Негорючая": []
+      },
+      "formula": "P_воспл(Q_расход, среда)",
+      "source": "src-17",
+      "confidence": "normative",
+      "notes": "выбор столбца условных вероятностей воспламенения по категории расхода и среды. Для негорючей среды ветви горения исключаются из расчета",
+      "target": "gs"
+    },
+    {
+      "id": "pm-lightning",
+      "pedal": "lightning_prot",
+      "title": "Молниезащита здания",
+      "category": "Здание",
+      "type": "lambda_k",
+      "applies": [
+        "building"
+      ],
+      "eta_levels": {
+        "I": 0.98,
+        "II": 0.95,
+        "III": 0.9,
+        "IV": 0.8
+      },
+      "formula": "Q_пораж = N_у.м · (1 − η_МЗ), N_у.м = (S + 6H)·(L + 6H)·n_у·10⁻⁶",
+      "source": "src-18",
+      "confidence": "normative-anchored",
+      "notes": "снижение частоты поражения здания молнией с учетом надежности молниезащиты. Надежность защиты по категориям I–IV: 0,98, 0,95, 0,90, 0,80",
+      "target": "building"
+    },
+    {
+      "id": "pm-temp-selfign",
+      "pedal": "hot_media",
+      "title": "Самовоспламенение при T_раб ≥ T_самовоспл",
+      "category": "Технология",
+      "type": "barrier_pfd",
+      "applies": [
+        "equipment"
+      ],
+      "p_success": 0.0,
+      "stage_level": 3,
+      "formula": "P_мгн.воспл = 1",
+      "source": "src-6",
+      "confidence": "normative",
+      "notes": "выход вещества, нагретого до температуры самовоспламенения и выше, сопровождается мгновенным воспламенением с условной вероятностью 1",
+      "target": "iz"
+    }
+  ],
+  "sources": [
+    {
+      "id": "src-1",
+      "title": "Приказ МЧС России № 533, прил. № 1, табл. П1.3/П1.4"
+    },
+    {
+      "id": "src-2",
+      "title": "Приказ МЧС России № 533, прил. № 1, табл. П1.1"
+    },
+    {
+      "id": "src-3",
+      "title": "Приказ МЧС России № 533, прил. № 1, табл. П1.2"
+    },
+    {
+      "id": "src-4",
+      "title": "ГОСТ 12.1.004-91, прил. 3, табл. 9"
+    },
+    {
+      "id": "src-5",
+      "title": "ГОСТ 12.1.004-91, прил. 3, п. 3.1.3; СО 153-34.21.122-2003, табл. 2.2"
+    },
+    {
+      "id": "src-6",
+      "title": "Приказ МЧС России № 533, прил. № 2, п. 3"
+    },
+    {
+      "id": "src-7",
+      "title": "ГОСТ Р 12.3.047-98, прил. Э, п. Э.4.5"
+    },
+    {
+      "id": "src-8",
+      "title": "ГОСТ Р 12.3.047-98, прил. А, п. А.2.5, ф. (А.13)"
+    },
+    {
+      "id": "src-9",
+      "title": "Приказ МЧС России № 533, прил. № 2, табл. П2.2"
+    },
+    {
+      "id": "src-10",
+      "title": "ГОСТ 12.1.004-91, п. 7.9"
+    },
+    {
+      "id": "src-11",
+      "title": "ГОСТ Р МЭК 61508-6-2012, прил. B, п. B.3.2.2"
+    },
+    {
+      "id": "src-12",
+      "title": "ГОСТ 27.002-2015"
+    },
+    {
+      "id": "src-13",
+      "title": "Приказ МЧС России № 533, прил. № 6, табл. П6.2"
+    },
+    {
+      "id": "src-14",
+      "title": "ГОСТ 31610.0"
+    },
+    {
+      "id": "src-15",
+      "title": "ГОСТ Р МЭК 61508-1-2012, табл. 2"
+    },
+    {
+      "id": "src-16",
+      "title": "ГОСТ Р МЭК 61508-6-2012, прил. B, п. B.3.2.2.1"
+    },
+    {
+      "id": "src-17",
+      "title": "Приказ МЧС России № 533, прил. № 2, табл. П2.1"
+    },
+    {
+      "id": "src-18",
+      "title": "ГОСТ 12.1.004-91, прил. 3, п. 3.1.3 (N_у.м). СО 153-34.21.122-2003, табл. 2.2 (η_МЗ)"
+    }
+  ]
+}
