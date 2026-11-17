@@ -5,11 +5,18 @@
 задает размер растра СХЕМ в документе; сам файл – один DOCX
 (A4 книжный по шаблону ГОСТ Р 21.101, колонки-штампы донца).
 Настройки «Содержимое» и отчетный переключатель упразднены вместе
-с PDF-экспортом (Задача 11: один проект = один DOCX)."""
+с PDF-экспортом (Задача 11: один проект = один DOCX).
+
+Сессия 19, Задачи 1 и 3: путь предзаполняется умным именем
+«Отчет-РЧП-…», выбор папки в «Обзор…» запоминается сразу (шов
+`remember_dir`), а успешный экспорт публикует фактический абсолютный
+путь в `exported_path` – по нему окно спрашивает, открыть ли отчет."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Callable, Optional
 
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -20,10 +27,17 @@ from ..export.report_docx import FORMAT_LABELS, export_docx
 
 class DocxExportDialog(QDialog):
     def __init__(self, parent=None, suggested_name: str = "отчет.docx",
-                 start_dir: str = ""):
+                 start_dir: str = "",
+                 remember_dir: Optional[Callable[[str], None]] = None):
         super().__init__(parent)
         self.setWindowTitle("Экспорт отчета в DOCX")
         self.setMinimumWidth(520)
+        # Задача 1 (сессия 19): вызывается при выборе пути в «Обзор…»
+        # (даже если диалог затем отменен) – MainWindow пишет export/last_dir
+        self._remember_dir = remember_dir
+        # Задача 3 (сессия 19): фактический абсолютный путь успешного
+        # экспорта (пусто, пока экспорт не удался)
+        self.exported_path: str = ""
         # данные экспорта (заполняет MainWindow перед exec)
         self._objects = None
         self._trees: list = []
@@ -96,6 +110,10 @@ class DocxExportDialog(QDialog):
             "Документ Word (*.docx)")
         if path:
             self.path_edit.setText(path)
+            # Задача 1 (сессия 19, LOCKED): выбранная папка запоминается
+            # СРАЗУ – даже если пользователь затем отменит диалог
+            if self._remember_dir is not None:
+                self._remember_dir(path)
 
     def _do_export(self) -> None:
         path = self.path_edit.text().strip()
@@ -103,7 +121,10 @@ class DocxExportDialog(QDialog):
             return
         if not path.lower().endswith(".docx"):
             path += ".docx"
-            self.path_edit.setText(path)
+        # Задача 3 (сессия 18, §8): export_docx требует АБСОЛЮТНЫЙ путь
+        # (pandoc работает во временном каталоге) – нормализуем поле
+        path = os.path.abspath(path)
+        self.path_edit.setText(path)
         try:
             export_docx(path, self._objects, self._trees, self._kb,
                         self._ctx_map, self._owner_titles,
@@ -112,4 +133,7 @@ class DocxExportDialog(QDialog):
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Экспорт DOCX", str(exc))
             return
+        # Задача 3 (сессия 19): публикуем фактический путь успешного
+        # экспорта – по нему MainWindow покажет вопрос об открытии отчета
+        self.exported_path = path
         self.accept()

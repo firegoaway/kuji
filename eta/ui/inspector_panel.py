@@ -853,6 +853,16 @@ class InspectorPanel(QWidget):
         add.clicked.connect(lambda: self._pick_cause(tree, gs))
         self._add(add)
 
+    def pick_cause_for(self, tree: TreeModel, kind: str) -> None:
+        """Задача 2 (сессия 19, LOCKED): публичный вход в выбор причины для
+        УКАЗАННОГО дерева и вида ноды («gs»/«iz») – общий для кнопки
+        инспектора и двойного клика по ноде холста. Диалог и сигналы
+        add_gs_requested/add_iz_requested те же, поэтому отмена, отметка
+        «изменено» и перерисовка не дублируются."""
+        if kind not in ("gs", "iz"):
+            return
+        self._pick_cause(tree, gs=(kind == "gs"))
+
     def _pick_cause(self, tree: TreeModel, gs: bool) -> None:
         records = self._cause_records(tree, gs)
         dlg = _CausePickerDialog(records, self)

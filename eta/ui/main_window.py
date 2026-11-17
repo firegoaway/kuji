@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .. import APP_TITLE, __version__
+from ..core.filenames import new_session_uid, report_docx_name
 from ..core.kb import KnowledgeBase
 from ..core.layout import fmt_q
 from ..core.matrix import build_matrix
@@ -145,6 +146,11 @@ class MainWindow(QMainWindow):
         self.objects = ObjectTree()
         self.trees: list[TreeModel] = []
         self._project_path: str = ""
+        # Задача 1 (сессия 19, LOCKED): UID несохраненного проекта для
+        # имени отчета «Отчет-РЧП-<UID>.docx» – ОДИН на документную
+        # сессию (переиспользуется при каждом открытии диалога экспорта),
+        # перегенерируется командой «Новый проект» и при перезапуске.
+        self._report_uid = new_session_uid()
         self._dirty = False
         self._selected_scenario: dict | None = None
         # Задача 1 (сессия 16): нода холста выделена КЛИКОМ ПОЛЬЗОВАТЕЛЯ
@@ -395,6 +401,10 @@ class MainWindow(QMainWindow):
         # пользователя (как клик), без смены инспектора
         self.canvas.nodes_selected.connect(
             self._on_canvas_nodes_selected)
+        # Задача 2 (сессия 19, LOCKED): двойной клик по ноде ГС/ИЗ –
+        # «Добавить причину…» для дерева этой ноды (тот же диалог)
+        self.canvas.node_add_cause_requested.connect(
+            self._on_node_add_cause)
         ins = self.inspector
         ins.object_props_changed.connect(lambda _o: self._refresh())
         ins.object_title_changed.connect(
@@ -622,6 +632,19 @@ class MainWindow(QMainWindow):
         # выделение ноды поставил КЛИК ПОЛЬЗОВАТЕЛЯ по холсту
         self._canvas_sel_by_click = True
         self._update_trash()
+
+    def _on_node_add_cause(self, tree_id: str, kind: str) -> None:
+        """Задача 2 (сессия 19, LOCKED): двойной клик по ноде ГС/ИЗ на
+        холсте = кнопка «Добавить причину…» инспектора, но для ДЕРЕВА
+        КЛИКНУТОЙ ноды. Диалог, accept-путь и отмена – общие с
+        инспектором (`inspector.pick_cause_for` → add_gs_requested /
+        add_iz_requested → _add_gs_cause / _add_iz_cause)."""
+        if kind not in ("gs", "iz"):
+            return
+        tree = next((t for t in self.trees if t.tree_id == tree_id), None)
+        if tree is None:
+            return
+        self.inspector.pick_cause_for(tree, kind)
 
     def _on_canvas_nodes_selected(self, ids: list) -> None:
         """Задача 6 (сессия 17): пользователь выделил ноды рамкой –
@@ -1346,28 +1369,57 @@ class MainWindow(QMainWindow):
         return root
 
     # ============================ проекты ============================
-    def _dir_hint(self) -> str:
-        """Задача 12 (сессия 18, LOCKED): папка предзаполнения файловых
-        диалогов – цепочка «последняя использованная → папка проекта →
-        Рабочий стол». Папка проверяется на существование."""
-        from PySide6.QtCore import QSettings
-        last = str(QSettings().value("ui/last_dir", "") or "")
-        if last and Path(last).is_dir():
-            return last
+    def _project_dir_or_desktop(self) -> str:
+        """Общий хвост цепочки предзаполнения: папка проекта → Рабочий
+        стол (оба проверяются на существование). Задача 12 (сессия 18),
+        Задача 1 (сессия 19)."""
         if self._project_path:
             d = os.path.dirname(self._project_path)
             if d and Path(d).is_dir():
                 return d
         return str(Path.home() / "Desktop")
 
+    def _dir_hint(self) -> str:
+        """Задача 12 (сессия 18, LOCKED): папка предзаполнения ПРОЕКТНЫХ
+        файловых диалогов (сохранить/открыть) – цепочка «ui/last_dir →
+        папка проекта → Рабочий стол». Сессия 19 (Задача 1, LOCKED):
+        экспорт в DOCX больше НЕ использует этот ключ, у него своя
+        память export/last_dir (_export_dir_hint)."""
+        from PySide6.QtCore import QSettings
+        last = str(QSettings().value("ui/last_dir", "") or "")
+        if last and Path(last).is_dir():
+            return last
+        return self._project_dir_or_desktop()
+
     def _remember_dir(self, path: str) -> None:
-        """Задача 12: запомнить папку успешного сохранения/открытия/
-        экспорта – все файловые диалоги предзаполняются ею (переживает
-        перезапуск, один ключ ui/last_dir)."""
+        """Задача 12: запомнить папку успешного сохранения/открытия
+        ПРОЕКТА (ключ ui/last_dir). Экспорт – только export/last_dir
+        (Задача 1, сессия 19), иначе отчет уводил бы «Открыть проект»
+        в папку отчетов."""
         from PySide6.QtCore import QSettings
         d = os.path.dirname(str(path))
         if d:
             QSettings().setValue("ui/last_dir", d)
+
+    def _export_dir_hint(self) -> str:
+        """Задача 1 (сессия 19, LOCKED): папка предзаполнения экспорта
+        DOCX – собственный ключ export/last_dir (исходники проектов и
+        отчеты живут в РАЗНЫХ папках), фолбэк – папка проекта →
+        Рабочий стол."""
+        from PySide6.QtCore import QSettings
+        last = str(QSettings().value("export/last_dir", "") or "")
+        if last and Path(last).is_dir():
+            return last
+        return self._project_dir_or_desktop()
+
+    def _remember_export_dir(self, path: str) -> None:
+        """Задача 1 (сессия 19, LOCKED): запомнить папку отчета – после
+        УСПЕШНОГО экспорта и после выбора пути в «Обзор…» (в т. ч. если
+        диалог затем отменен). Ключ ui/last_dir не трогает."""
+        from PySide6.QtCore import QSettings
+        d = os.path.dirname(os.path.abspath(str(path)))
+        if d:
+            QSettings().setValue("export/last_dir", d)
 
     def _mark_dirty(self) -> None:
         self._dirty = True
@@ -1405,6 +1457,9 @@ class MainWindow(QMainWindow):
         self.objects.clear()
         self.trees = []
         self._project_path = ""
+        # Задача 1 (сессия 19, LOCKED): новый документ – новый UID имени
+        # отчета (прежний относится к закрытому документу)
+        self._report_uid = new_session_uid()
         self._dirty = False
         self._selected_scenario = None
         self._undo_reset()          # Задача 4 (сессия 17): новая история
@@ -1501,22 +1556,71 @@ class MainWindow(QMainWindow):
     def _export_docx(self) -> None:
         """Задачи 10/11 (сессия 18, LOCKED): единый DOCX-отчет –
         диалог формата листа схем + пути; сборка через встроенный
-        pandoc по ГОСТ-шаблону; подсказка статус-бара «DOCX: …»."""
+        pandoc по ГОСТ-шаблону; подсказка статус-бара «DOCX: …».
+
+        Задача 1 (сессия 19, LOCKED): имя файла – «Отчет-РЧП-<база
+        проекта | UID>.docx», папка – собственная память export/last_dir.
+        Задача 3 (сессия 19, LOCKED): после успешного экспорта (диалог
+        уже закрыт) окно спрашивает, открыть ли отчет."""
         from .dialogs import DocxExportDialog
-        suggested = (Path(self._project_path).stem + ".docx"
-                     if self._project_path else "расчет-частоты-пожара.docx")
         dlg = DocxExportDialog(
-            parent=self, suggested_name=suggested,
-            # Задача 12: стартовая папка – последний каталог
-            # (→ папка проекта → Рабочий стол)
-            start_dir=self._dir_hint())
+            parent=self,
+            # Задача 1: умное имя (сохраненный проект – его база имени,
+            # несохраненный – UID документной сессии)
+            suggested_name=report_docx_name(self._project_path,
+                                            self._report_uid),
+            start_dir=self._export_dir_hint(),
+            remember_dir=self._remember_export_dir)
         dlg.set_project_data(self.objects, self.trees, self.kb,
                              self.ctx_map(), self._owner_titles(),
                              self.canvas)
-        if dlg.exec() == DocxExportDialog.Accepted:
-            self._remember_dir(dlg.path_edit.text())   # Задача 12
-            self.statusBar().showMessage(
-                f"DOCX: {dlg.path_edit.text()}", 8000)
+        if dlg.exec() != DocxExportDialog.Accepted:
+            return
+        self._after_docx_export(dlg.exported_path
+                                or dlg.path_edit.text())
+
+    def _after_docx_export(self, path: str) -> None:
+        """Задачи 1/3 (сессия 19): что делает окно ПОСЛЕ успешного
+        экспорта – память папки отчетов, подсказка статус-бара и вопрос
+        об открытии. Вынесено из `_export_docx` отдельным методом:
+        offscreen-тесты прогоняют всю цепочку без модального диалога."""
+        out = str(path or "").strip()
+        if not out:
+            return
+        # Задача 1 (LOCKED): успешный экспорт обновляет ТОЛЬКО
+        # export/last_dir (ui/last_dir – про проекты, блок изоляции)
+        self._remember_export_dir(out)
+        self.statusBar().showMessage(f"DOCX: {out}", 8000)
+        # Задача 3 (LOCKED): вопрос об открытии – только по факту
+        # созданного файла; оба шага – швы для offscreen-тестов
+        if Path(out).is_file() and self._ask_open_report(out):
+            if not self._open_path(out):
+                QMessageBox.information(
+                    self, "Экспорт завершен",
+                    "Не удалось открыть отчет автоматически."
+                    f" Файл сохранен: {out}")
+
+    def _ask_open_report(self, path: str) -> bool:
+        """Задача 3 (сессия 19, LOCKED): «Отчет сформирован. Желаете
+        открыть его сейчас?» – Да/Нет. Шов: offscreen-тесты подменяют
+        метод, модалка в прогоне не крутится."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Экспорт завершен")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText("Отчет сформирован. Желаете открыть его сейчас?")
+        yes = box.addButton("Да", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Нет", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(yes)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _open_path(self, path: str) -> bool:
+        """Задача 3 (сессия 19): открыть файл системным приложением по
+        умолчанию. Шов для тестов; False – ассоциации нет (тогда окно
+        сообщает путь, чтобы пользователь открыл файл сам)."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))))
 
     # ============================ настройки ============================
     def _persist_ui_state(self) -> None:

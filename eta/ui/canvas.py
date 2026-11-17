@@ -277,8 +277,14 @@ class TreeCanvas(ViewportGestures, QGraphicsView):
     # Задача 6 (сессия 17): пользователь выделил МНОЖЕСТВО нод рамкой
     # (без открытия инспектора – «последней ноды» у рамки нет)
     nodes_selected = Signal(list)
+    # Задача 2 (сессия 19, LOCKED): двойной клик ЛКМ по ноде ГС/ИЗ –
+    # «Добавить причину…» для ДЕРЕВА ЭТОЙ НОДЫ (tree_id, вид «gs»/«iz»)
+    node_add_cause_requested = Signal(str, str)
 
     DRAG_THRESHOLD_PX = 5.0             # порог «клик vs перетаскивание»
+
+    # Задача 2 (сессия 19, LOCKED): виды нод, у которых есть причины
+    CAUSE_KINDS = ("gs", "iz")
 
     # Задача 6 (LOCKED вариант 1): рамка выделения – translucent blue
     # rgba(59,130,246,0.12) + рамка 1 px #3B82F6 (плоский канон)
@@ -309,11 +315,13 @@ class TreeCanvas(ViewportGestures, QGraphicsView):
         # подсказка управления холстом (Задача 6: смена модели ЛКМ)
         self.setStatusTip("ЛКМ по пустому месту и протяните – рамка"
                           " выделения; Пробел + ЛКМ или СКМ – панорама;"
-                          " колесо – масштаб")
+                          " колесо – масштаб; двойной клик по ноде ГС/ИЗ –"
+                          " добавить причину")
         self.setToolTip("Рамка выделения: ЛКМ по пустому месту и"
                         " протянуть; Ctrl/Shift + ЛКМ – добавить/убрать"
                         " ноду из выделения; панорама: Пробел + ЛКМ или"
-                        " СКМ; масштаб – колесо")
+                        " СКМ; масштаб – колесо; двойной клик по ноде"
+                        " ГС/ИЗ – добавить причину")
         # состояние ЛКМ: перетаскивание ноды / справочной ноды / рамка
         self._press_item: NodeItem | None = None
         self._press_pos = QPointF()
@@ -686,6 +694,41 @@ class TreeCanvas(ViewportGestures, QGraphicsView):
                 e.accept()
                 return
         super().mouseReleaseEvent(e)
+
+    # ---------- двойной клик: добавить причину (Задача 2, сессия 19) ----
+    def mouseDoubleClickEvent(self, e) -> None:
+        """Задача 2 (сессия 19, LOCKED): двойной клик ЛКМ по ноде ГС или ИЗ
+        РАБОЧЕГО холста равен нажатию «Добавить причину…» в инспекторе
+        ЭТОЙ ноды: тот же диалог, то же дерево, та же цепочка отмены.
+
+        Безопасный no-op во всех прочих случаях: ноды вещества, окислителя
+        и пожара, справочные ноды (`AnnotationItem`) и пустое место.
+        Последовательность Qt (Press → Release → DoubleClick → Release)
+        такова, что ПЕРВЫЙ Release уже выбрал ноду и показал её форму,
+        поэтому выбор здесь только дополняется (идемпотентно, без второго
+        щелчка по инспектору). Оффсеты нод не трогаются: драг требует
+        движения не менее DRAG_THRESHOLD_PX, а DoubleClick его не делает.
+        Лист «Документ» не затронут – там другие элементы (`_DocNodeItem`).
+        """
+        if (e.button() == Qt.MouseButton.LeftButton
+                and not self._pan_armed()):
+            it = self.itemAt(e.position().toPoint())
+            if isinstance(it, NodeItem):
+                nid = it.geo.node_id
+                kind = self.controller.node_kind(nid)
+                if kind in self.CAUSE_KINDS:
+                    tree = self.controller.tree_of_node(nid)
+                    if tree is not None:
+                        # контекст инспектора – по кликнутной ноде: форма
+                        # этого дерева должна быть показана ДО диалога
+                        if self.controller.selected_node() != nid:
+                            self.controller.select_node(nid)
+                            self.node_clicked.emit(nid)
+                        self.node_add_cause_requested.emit(tree.tree_id,
+                                                           kind)
+                    e.accept()
+                    return
+        super().mouseDoubleClickEvent(e)
 
     # ---------- перетаскивание ноды ----------
     def _move_node_item(self, item: NodeItem, d: QPointF) -> None:
