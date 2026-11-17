@@ -1,4 +1,5 @@
-"""Нативное pop-out окно «ДОКУМЕНТ – ТАБЛИЦА / ЛИСТ ДЛЯ PDF» (сессия 8).
+"""Нативное pop-out окно «ДОКУМЕНТ – ТАБЛИЦА / ЛИСТ ДЕРЕВА» (сессия 8;
+заголовок обновлён в сессии 18 вместе с упразднением PDF-экспорта).
 
 Панель документа (шапка с переключателем «Матричный вид» /
 «Схематический вид», кнопка «Вписать по ширине», таблица сценариев
@@ -53,7 +54,7 @@ class DocumentWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(
             f"QWidget#docWindow {{ background: {APP_BG}; border: none; }}")
-        self.setWindowTitle(f"ДОКУМЕНТ – ТАБЛИЦА / ЛИСТ ДЛЯ PDF – {APP_TITLE}")
+        self.setWindowTitle(f"ДОКУМЕНТ – ТАБЛИЦА / ЛИСТ ДЕРЕВА – {APP_TITLE}")
         self.setWindowIcon(app_icon())
         self.setMinimumSize(520, 320)
         self.resize(1060, 660)

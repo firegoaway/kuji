@@ -246,7 +246,10 @@ def result_lines(tree, kb, ctx) -> list[str]:
 # =====================================================================
 # Markdown-верстка (промежуточный формат pandoc)
 # =====================================================================
-_MD_SPECIAL = set("\\`*_{}[]()#|~^<>!")
+# Скобки ( ) и дефис НЕ экранируем: в CommonMark на позициях текста они
+# не управляющие (ссылка требует «[text](url)» целиком), а имена
+# сценариев и формулы («1−exp(−3,2·10⁻⁶)») пестрят скобками
+_MD_SPECIAL = set("\\`*_{}[]#|~^<>!")
 
 
 def _md_escape(text: str) -> str:
@@ -449,6 +452,9 @@ def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
     if not REFERENCE_DOCX.exists():
         raise FileNotFoundError(
             "Не найден шаблон отчета eta\\export\\reference.docx")
+    # pandoc запускается с cwd=временной папке – ПУТЬ К ВЫВОДУ обязан
+    # быть абсолютным (относительный resolution'ился бы в temp)
+    path = str(Path(path).resolve())
     with tempfile.TemporaryDirectory(prefix="kuji_docx_") as tmp:
         tmp_dir = Path(tmp)
         images: list[tuple[str, str]] = []

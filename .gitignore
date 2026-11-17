@@ -9,10 +9,24 @@ runtime/
 # Артефакты тестов/QA/диагностики – генерируются локально прогонами
 qa_artifacts/
 test_exports/
+data/
 
 # Сторонние шаблоны дизайна (бинарные AI/EPS/FIG, 113 MB) – референс,
 # не исходный код приложения
 design_templates/
+
+# Решение заказчика 17.11.2026: исторические промпты/отчеты сессий и
+# вся тестовая/QA-обвязка остаются только локально, в репозиторий не
+# вносятся
+old prompts (done prompts)/
+smoke_test.py
+gesture_test.py
+visual_qa_runner.py
+run_qa.cmd
+run_qa_pdf.cmd
+run_qa_pdf.ps1
+render_pdf_pages.ps1
+run_app_debug.cmd
 
 # Кэш Python
 __pycache__/
@@ -31,3 +45,6 @@ _tmp_*
 .vscode/
 Thumbs.db
 Desktop.ini
+
+# резервные копии шаблона
+*.docx.bak
