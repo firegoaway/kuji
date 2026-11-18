@@ -627,13 +627,26 @@ KUJI_DEBUG_KEYS=1). Правило на будущее: любое измене�
 своей среды. Требование заказчика (раунд 5): открывать САМ отчёт, а не папку с
 ним. Поэтому `MainWindow._open_path` идёт по цепочке ШВОВ (тесты подменяют
 методы и никогда не порождают реальные процессы):
-(1) `_launch_via_explorer` – ПЕРВИЧНЫЙ с сессии 20 (трасса заказчика
-доказала: прежний первичный cmd start ИСПОЛНЯЛСЯ, но симптом «пустой
-Word + Normal.dotm» оставался): `explorer.exe "<файл>"` ВООБЩЕ без
-флагов создания и без `/select` – открытие выполняет сам процесс
-Проводника, тот же механизм, что двойной клик (единственный чистый
-путь по замерам заказчика); `way=explorer` в трассе;
-(2) `_launch_detached_start` – `cmd.exe /c start "" "<файл>"` в ОТСОЕДИНЁННОМ
+(1) `_launch_winword_direct` – ПЕРВИЧНЫЙ с раунда 3 (сессия 20; оба
+шёлловских способа закрыты замерами: cmd start исполнялся, но давал
+предупреждение Normal.dotm и пустое окно, explorer.exe с файлом
+запускался и молча не открывал ничего): ПРЯМОЙ `WINWORD.EXE /n
+"<файл>"` отсоединённым процессом с теми же флагами, что (2). Путь к
+exe читает `_resolve_winword_exe()` – БЕЗ ShellExecute: значение
+`HKLM\…\App Paths\WINWORD.EXE`, затем разбор ассоциации
+`HKCR\.docx` → ProgID → `shell\Open\command` (первый токен в кавычках
+или наращиваемый префикс без кавычек, переключатели и `"%1"`
+отсекаются, проверка isfile). Имя файла идёт Юникод-командной строкой
+CreateProcessW – Кириллица без OEM-кодировок, DDE не участвует вовсе;
+`/n` открывает документ в новом экземпляре Word вместо переиспользова-
+ния работающего. Это CreateProcess подписанного exe, НЕ COM-автома-
+тация – запрет Word COM не затронут. В трассе `way=winword`
+(резолвер – шов: тесты подменяют `_resolve_winword_exe`);
+(2) `_launch_via_explorer` – `explorer.exe "<файл>"` ВООБЩЕ без
+флагов создания и без `/select`; на машине заказчика замерено пустым
+(процесс жив, ничего не открылось), остаётся запасным для иных сред;
+в трассе `way=explorer`;
+(3) `_launch_detached_start` – `cmd.exe /c start "" "<файл>"` в ОТСОЕДИНЁННОМ
 процессе: `creationflags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
 (0x8 | 0x200), `cwd` = папка файла, `env = _clean_child_env()`,
 `close_fds=True`, stdio в DEVNULL. Смысл: Word запускает не python.exe с
@@ -642,13 +655,13 @@ Word + Normal.dotm» оставался): `explorer.exe "<файл>"` ВООБЩ
 ShellExecute и сразу завершается. ВАЖНО: `DETACHED_PROCESS` и
 `CREATE_NO_WINDOW` вместе передавать НЕЛЬЗЯ – это два способа задать «консоли
 нет», вместе они дают ошибку создания процесса;
-(3) `_launch_detached_powershell` – `powershell -NoProfile -NonInteractive
+(4) `_launch_detached_powershell` – `powershell -NoProfile -NonInteractive
 -WindowStyle Hidden -Command Start-Process -FilePath "<файл>"`, те же флаги;
-(4) `_reveal_in_explorer` – `'"<explorer>" /select,"<файл>"'` БЕЗ
+(5) `_reveal_in_explorer` – `'"<explorer>" /select,"<файл>"'` БЕЗ
 `CREATE_NO_WINDOW` (с ним оболочка молча проглатывала вызов – замер на 6.10.1);
-в трассе `way=explorer-select`, чтобы не путать с (1);
-(5) `_launch_via_startfile` – `os.startfile(path, "open")`;
-(6) `QDesktopServices.openUrl` – прочие платформы и отказ всех пяти.
+в трассе `way=explorer-select`, чтобы не путать с (2);
+(6) `_launch_via_startfile` – `os.startfile(path, "open")`;
+(7) `QDesktopServices.openUrl` – прочие платформы и отказ всех шести.
 `_clean_child_env()` выбрасывает из PATH сегменты, содержащие `runtime`,
 `pyside`, `shiboken`, `qt`, и НЕ трогает `APPDATA`/`LOCALAPPDATA`/`USERPROFILE` –
 по ним Word ищет свой `%APPDATA%\Microsoft\Templates\Normal.dotm` (проверено:
@@ -660,26 +673,24 @@ ShellExecute и сразу завершается. ВАЖНО: `DETACHED_PROCESS
 `launch-attempt way=… rc=…` в `launch_trace.log` (сессия 20; см. трассу
 выше).
 
-**Статус Normal.dotm (сессия 20, решающий замер 18.11.2026).** Исключено:
+**Статус Normal.dotm (сессия 20, раунды замеров 18.11.2026).** Исключено:
 пакет чист (нет `Normal.dotm`/`attachedTemplate` – исключение в
 `export_docx`, флаг QA, блок 52), `APPDATA`/`LOCALAPPDATA`/`USERPROFILE`
 не подменяются, PATH отсечён, варианты написания пути и брокера
 перепробованы (раунды 1–5). РЕШАЮЩИЙ опыт: при полностью закрытом
 WINWORD.EXE тот же отчёт из Проводника открывается ЧИСТО → гипотеза
 «повреждён Normal.dotm заказчика» (H-B) ИСКЛЮЧЕНА, остаётся наш контекст
-запуска (H-A). Сессия 20, трасса заказчика (launch_trace.log 14:51–14:53):
-во ВСЕХ запусках реально исполнялся первичный `cmd start`
-(`way=cmd rc=spawned` с pid) – цепочка молча не деградировала, но симптом
-«Word жалуется на Normal.dotm и открывает ПУСТОЕ окно, отчёт не открыт»
-остался. Поэтому ОДНОЙ измеренной правкой первичным способом стал
-`_launch_via_explorer` (см. выше цепочку): открытие выполняет сам процесс
-Проводника – тот же механизм, что двойной клик. Правила на проверку:
-никаких новых гипотез «исправлением» – трасса до, одна правка, замер
-заказчика после (с обязательным вопросом «ЧТО появилось: отчёт, окно
-папки или ничего?» – напрямую порождённый explorer.exe не гарантированно
-ведёт себя как работающая оболочка); резерв без DDE – прямой запуск
-`WINWORD.EXE /n <файл>` (путь из `App Paths`, `DETACHED_PROCESS |
-CREATE_NEW_PROCESS_GROUP`, без CREATE_NO_WINDOW; это НЕ COM-автоматация).
+запуска (H-A). Дальнейшее – по трассе, одной правкой на замер:
+раунд 2: `cmd start` ИСПОЛНЯЛСЯ (`way=cmd rc=spawned`), но Word
+жаловался на Normal.dotm и открывал ПУСТОЕ окно; раунд 3:
+`explorer.exe <файл>` без флагов запускался (`way=explorer
+rc=spawned pid=…`), но НЕ открывал ничего; заказчик подтвердил: двойной
+диалог побеждён, вопрос о перезаписи устраивает. Отсюда первичным стал
+зарезервированный шаг `_launch_winword_direct` (см. цепочку выше) –
+прямой CreateProcess-запуск WINWORD.EXE с Юникод-путём, в обход и
+ShellExecute/DDE, и кодировок cmd. Правило остаётся: трасса до, одна
+правка, замер заказчика после; если и это не откроет отчёт – следующая
+гипотеза только с новыми строками трассы.
 
 **Ход формирования отчёта (сессия 19, раунд 2).** `export_docx(...,
 progress=None)` принимает извещатель `progress(value: float, message: str)`

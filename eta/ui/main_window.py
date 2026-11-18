@@ -81,6 +81,59 @@ def _clean_child_env() -> dict:
         if p and not any(n in p.lower() for n in _ENV_NOISE))
     return env
 
+
+def _resolve_winword_exe() -> str:
+    """Путь WINWORD.EXE БЕЗ ShellExecute (сессия 20, резервный шаг).
+    Порядок: (1) значение по умолчанию
+    HKLM\\…\\App Paths\\WINWORD.EXE – полный путь без аргументов;
+    (2) разбор ассоциации HKCR\\.docx → ProgID → shell\\Open\\command:
+    первый токен (в кавычках или до пробела/ключа) минус переключатели.
+    Пустая строка = не нашли; вызов НЕ читает пользовательские кусты
+    (только HKLM/HKCR машины) и ничего не пишет."""
+    try:
+        import winreg
+    except ImportError:
+        return ""
+
+    def _ok(value: str) -> str:
+        v = os.path.expandvars(str(value).strip().strip('"').strip())
+        return v if v and os.path.isfile(v) else ""
+
+    try:
+        with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"Software\Microsoft\Windows\CurrentVersion"
+                r"\App Paths\WINWORD.EXE") as k:
+            exe = _ok(winreg.QueryValueEx(k, "")[0])
+        if exe:
+            return exe
+    except OSError:
+        pass
+    try:
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, ".docx") as k:
+            progid = str(winreg.QueryValueEx(k, "")[0]).strip()
+        if not progid:
+            return ""
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                            rf"{progid}\shell\Open\command") as k:
+            raw = str(winreg.QueryValueEx(k, "")[0]).strip()
+    except OSError:
+        return ""
+    if not raw:
+        return ""
+    if raw.startswith('"'):
+        end = raw.find('"', 1)
+        return _ok(raw[1:end]) if end > 0 else _ok(raw.strip('"'))
+    # без кавычек путь может содержать пробелы: наращиваем префикс,
+    # пока он не станет существующим файлом (переключатели вида /n, %1
+    # существующим файлом быть не могут и отсекаются сами)
+    parts = raw.split()
+    for i in range(len(parts), 0, -1):
+        exe = _ok(" ".join(parts[:i]))
+        if exe:
+            return exe
+    return ""
+
 # Задача 4: действия «Правка» – ЕДИНЫЕ на приложение (родитель – сам
 # QApplication), создаются ОДИН раз и dispatch'атся в АКТИВНОЕ окно
 # (или последнее созданное). Пер-оконные ApplicationShortcut-действия
@@ -1761,21 +1814,22 @@ class MainWindow(QMainWindow):
         наследует его окружение – PATH с каталогами встроенного Python и
         PySide6, рабочую папку проекта, COM-контекст GUI-потока Qt.
 
-        Сессия 20, задача 2. Трасса заказчика (launch_trace.log, 18.11.2026)
-        показала: во всех запусках реально исполнялся первичный способ
-        `cmd start` (way=cmd rc=spawned) – цепочка молча не деградировала,
-        но симптом остался: Word жалуется на Normal.dotm и открывает ПУСТОЕ
-        окно, сам отчёт не открывается. Единственный путь, который его
-        измерения стабильно дают чистым, – открытие из самого Проводника,
-        поэтому первичным способом стал `explorer.exe "<файл>"` ВООБЩЕ без
-        флагов создания (`_launch_via_explorer`): открытие выполняет сам
-        процесс оболочки – тот же механизм, что двойной клик. Прежние
-        способы остаются запасными (каждый – шов, тесты не порождают
-        реальных процессов). Все попытки пишутся в launch_trace.log
-        строкой «launch-attempt way=… rc=…» и в key_debug.log строкой
-        «open-report | …»."""
+        Сессия 20, задача 2, раунды 2–3. Трасса заказчика закрыла оба
+        прежних первичных способа: `cmd start` ИСПОЛНЯЛСЯ (way=cmd
+        rc=spawned), но Word показывал предупреждение Normal.dotm и
+        пустое окно; `explorer.exe <файл>` без флагов запускался
+        (way=explorer rc=spawned pid), но НЕ открывал НИЧЕГО. Поэтому
+        первичным стал резервный шаг – ПРЯМОЙ запуск WINWORD.EXE
+        (`_launch_winword_direct`): путь к exe читается из реестра без
+        ShellExecute, файл передается Юникод-командной строкой CreateProcess,
+        DDE не участвует вовсе. Прежние способы остаются запасными (каждый –
+        шов, тесты не порождают реальных процессов). Все попытки пишутся в
+        launch_trace.log строкой «launch-attempt way=… rc=…» и в
+        key_debug.log строкой «open-report | …»."""
         target = os.path.abspath(str(path))
         if os.name == "nt":
+            if self._launch_winword_direct(target):
+                return True
             if self._launch_via_explorer(target):
                 return True
             if self._launch_detached_start(target):
@@ -1793,17 +1847,53 @@ class MainWindow(QMainWindow):
         _lt.trace_line("launch-attempt", way="qt", rc=f"{ok}")
         return ok
 
+    def _launch_winword_direct(self, path: str) -> bool:
+        """Первичный способ (сессия 20, раунд 3; прежде – зарезервиро-
+        ванный): ПРЯМОЙ запуск `WINWORD.EXE /n "<файл>"` отсоединённым
+        процессом. Зачем: оба шёлловских способа измерены заказчиком и
+        закрыты – DDE-путь через cmd start давал предупреждение
+        Normal.dotm и пустое окно, а напрямую порождённый explorer.exe
+        молча не открывал ничего. Здесь путь к exe читается из реестра
+        (`_resolve_winword_exe`, без ShellExecute), имя файла идёт
+        Юникод-командной строкой CreateProcess – Кириллица и DDE не
+        участвуют вовсе. `/n` открывает документ в НОВОМ экземпляре Word
+        вместо переиспользования работающего. Это обычный CreateProcess
+        подписанного exe, НЕ COM-автоматация – запрет на Word COM
+        не затронут. Шов; в трассе way=winword."""
+        import subprocess
+        exe = _resolve_winword_exe()
+        if not exe:
+            self._log_open_attempt("WINWORD.EXE не найден (App Paths и"
+                                   " ассоциация .docx)")
+            _lt.trace_line("launch-attempt", way="winword",
+                           rc="fail err=exe-not-found")
+            return False
+        try:
+            proc = subprocess.Popen(
+                [exe, "/n", os.path.normpath(path)],
+                cwd=os.path.dirname(path) or None, env=_clean_child_env(),
+                close_fds=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=_DETACHED_FLAGS)
+        except OSError as exc:
+            self._log_open_attempt(f"WINWORD.EXE отказал ({exc})")
+            _lt.trace_line("launch-attempt", way="winword",
+                           rc=f"fail err={exc}")
+            return False
+        self._log_open_attempt(f"WINWORD.EXE /n → {path}")
+        _lt.trace_line("launch-attempt", way="winword",
+                       rc=f"spawned pid={proc.pid} exe={os.path.basename(exe)}")
+        return True
+
     def _launch_via_explorer(self, path: str) -> bool:
-        """Основной способ (сессия 20, задача 2): `explorer.exe "<файл>"`
-        вообще БЕЗ флагов создания – ни /select (тот открывает ПАПКУ, а не
-        отчёт), ни CREATE_NO_WINDOW (с ним оболочка молча глотала вызов –
-        замер 6.10.1), ни DETACHED-флагов: открытие выполняет сам процесс
-        Проводника, ровно тот путь, что двойной клик (замер заказчика
-        18.11.2026: из Проводника файл открывается чисто). Шов; в трассе –
-        way=explorer. ОСТОРОЖНО (внешняя рецензия): напрямую порождённый
-        explorer.exe не гарантированно ведет себя как работающая оболочка –
-        может открыть окно папки вместо файла; при проверке у заказчика
-        обязателен вопрос «ЧТО появилось на экране?»."""
+        """Запасной способ №2 (сессия 20, раунды 2–3): `explorer.exe
+        "<файл>"` вообще БЕЗ флагов создания – на машине заказчика
+        замерен как молча ничего не открывающий, поэтому уступил первое
+        место прямому WINWORD.EXE, но ОСТАЁТСЯ в цепочке: на иных
+        сборках Windows сам процесс Проводника выполняет открытие (тот
+        же механизм, что двойной клик). Ни /select (тот открывает ПАПКУ,
+        а не отчёт), ни CREATE_NO_WINDOW (с ним оболочка молча глотала
+        вызов – замер 6.10.1), ни DETACHED-флагов. Шов; way=explorer."""
         import subprocess
         explorer = os.path.join(
             os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
@@ -1824,7 +1914,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _launch_detached_start(self, path: str) -> bool:
-        """Запасной способ №1 (сессия 19, раунд 5; с сессии 20 – НЕ
+        """Запасной способ №3 (сессия 19, раунд 5; с сессии 20 – НЕ
         первичный: трасса заказчика показала way=cmd rc=spawned при
         живом симптоме «пустой Word»): `cmd /c start "" "<файл>"` в
         ОТСОЕДИНЁННОМ процессе с очищенным окружением. Шов для тестов.
