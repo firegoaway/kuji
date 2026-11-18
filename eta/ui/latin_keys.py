@@ -264,6 +264,19 @@ def _dispatch_letter(seq: str) -> bool:
     return fired
 
 
+def dispatched_recently(seq: str, window_s: float = 0.5) -> bool:
+    """Шёл ли запуск `seq` только что через диспетчер `_dispatch_letter`.
+
+    Сессия 20, трасса запуска: `_LAST_FIRED[seq]` штампуется СИНХРОННО
+    прямо перед `action.trigger()`, поэтому свежий штамп на входе в
+    слот действия = действие запущено фильтром latin_keys (маршрут
+    ShortcutOverride). Отсутствие штампа – действие запущено механикой
+    Qt (пункт меню или нативный шорткат) – тот маршрут, которого
+    `_IN_FLIGHT` не видит вовсе."""
+    now = time.monotonic()
+    return now - _LAST_FIRED.get(seq, 0.0) < window_s
+
+
 def _seq_of(mods, letter: str) -> str | None:
     """Каноническое имя последовательности для реестра. Shift – часть
     имени (Ctrl+Shift+S «Сохранить как…»), Meta игнорируется веткой

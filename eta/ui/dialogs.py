@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog,
                                QProgressBar, QPushButton, QVBoxLayout)
 
 from ..export.report_docx import FORMAT_LABELS, export_docx
+from . import launch_trace
 
 
 def _pump(times: int = 3) -> None:
@@ -191,12 +192,19 @@ class DocxExportDialog(QDialog):
         # Сессия 19 (просьба заказчика): видно, на каком этапе сейчас
         # формирование – схемы, текст, конвертация, зачистка, проверка
         prog = self._make_progress()
+        # Сессия 20, трасса (launch_trace.log, всегда включена): время
+        # сборки отделяет «экспорт шёл N мс» от «диалог закрыли до
+        # запуска» и показывает, каким длинным было окно ре-ентрабельности
+        import time
+        _t0 = time.monotonic()
+        launch_trace.trace_line("dlg-export-start", path=path)
         try:
             export_docx(path, self._objects, self._trees, self._kb,
                         self._ctx_map, self._owner_titles,
                         self.size_combo.currentData(), canvas=self._canvas,
                         progress=(prog.stage if prog is not None else None))
         except Exception as exc:  # noqa: BLE001 – русская диагностика
+            launch_trace.trace_line("dlg-export-fail", err=str(exc))
             if prog is not None:
                 prog.close_progress()
             from PySide6.QtWidgets import QMessageBox
@@ -204,6 +212,8 @@ class DocxExportDialog(QDialog):
             return
         if prog is not None:
             prog.close_progress()
+        launch_trace.trace_line(
+            "dlg-export-done", ms=int((time.monotonic() - _t0) * 1000))
         # Задача 3 (сессия 19): публикуем фактический путь успешного
         # экспорта – по нему MainWindow покажет вопрос об открытии отчета
         self.exported_path = path

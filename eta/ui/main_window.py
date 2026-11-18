@@ -27,7 +27,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .. import APP_TITLE, __version__
-from ..core.filenames import new_session_uid, report_docx_name
+from ..core.filenames import (new_session_uid, project_basename,
+                              report_docx_name)
 from ..core.kb import KnowledgeBase
 from ..core.layout import fmt_q
 from ..core.matrix import build_matrix
@@ -39,6 +40,7 @@ from ..core.objects import (KIND_TITLES, ObjectTree, ObjNode, TERRITORY,
 from ..core.serializer import (UnsupportedFormatError, load_project,
                                save_project)
 from . import app_settings as _as
+from . import launch_trace as _lt
 from .canvas import TreeCanvas
 from .doc_window import DocumentWindow
 from .docview import DocumentView
@@ -344,7 +346,10 @@ class MainWindow(QMainWindow):
         # доставляет Ctrl+E через ShortcutOverride на реальной Windows
         self.act_export.setShortcuts([QKeySequence("Ctrl+E"),
                                       QKeySequence("Ctrl+У")])
-        self.act_export.triggered.connect(self._export_docx)
+        # Сессия 20: слот получил параметр source (трасса запуска), а
+        # triggered несёт bool checked – прямой connect подсунул бы его
+        # в source, поэтому замыкаем без аргументов
+        self.act_export.triggered.connect(lambda: self._export_docx())
         m_file.addAction(self.act_export)
         m_file.addSeparator()
         act_quit = QAction("Выход")
@@ -1633,7 +1638,7 @@ class MainWindow(QMainWindow):
             return
         self._write_project(path)
 
-    def _export_docx(self) -> None:
+    def _export_docx(self, source: str | None = None) -> None:
         """Задачи 10/11 (сессия 18, LOCKED): единый DOCX-отчет –
         диалог формата листа схем + пути; сборка через встроенный
         pandoc по ГОСТ-шаблону; подсказка статус-бара «DOCX: …».
@@ -1641,16 +1646,38 @@ class MainWindow(QMainWindow):
         Задача 1 (сессия 19, LOCKED): имя файла – «Отчет-РЧП-<база
         проекта | UID>.docx», папка – собственная память export/last_dir.
         Задача 3 (сессия 19, LOCKED): после успешного экспорта (диалог
-        уже закрыт) окно спрашивает, открыть ли отчет."""
+        уже закрыт) окно спрашивает, открыть ли отчет.
+
+        Задача 1 (сессия 20, регрессия «диалог открывается дважды»):
+        пояс `_export_running` теперь держится по ВСЕЙ цепочке –
+        диалог, вопрос об открытии и запуск отчёта, – и на то же время
+        гасится `act_export`: нативный шорткат Qt (Ctrl+E/У) запускает
+        `triggered` мимо диспетчера latin_keys, `_IN_FLIGHT` его не
+        видит, а окно хода экспорта качает события `processEvents()` –
+        именно в «шве» между снятием пояса и вопросом второй
+        `triggered` и открывал диалог снова (замер заказчика на
+        6.10.3). `source` пишется в трассу launch_trace.log: shortcut –
+        диспетчер latin_keys, menu – механика Qt (пункт меню или
+        нативный шорткат); отвергнутый поясом вход логируется как
+        `dlg-open-blocked`."""
+        import time
         from .dialogs import DocxExportDialog
+        from .latin_keys import dispatched_recently
+        if source is None:
+            source = ("shortcut" if dispatched_recently("Ctrl+E")
+                      else "menu")
+        ident = project_basename(self._project_path) or self._report_uid
         if self._export_running:
-            # Защита от повторного входа: модальный exec() держит вложенный
-            # цикл событий, и возобновившаяся после его закрытия цепочка
-            # родителей ShortcutOverride могла бы открыть диалог ВТОРОЙ РАЗ
-            # (замечено заказчиком 17.11.2026; корень исправлен в
-            # latin_keys._dispatch_letter, это – второй пояс)
+            _lt.trace_line("dlg-open-blocked", reason="belt",
+                           source=source, project=ident)
             return
+        _lt.trace_line("dlg-open", source=source, project=ident,
+                       t=round(time.monotonic(), 3))
         self._export_running = True
+        # гасим и меню, и НАТИВНЫЙ шорткат Qt на весь поток: этот
+        # маршрут до сих пор не был накрыт ни одним поясом. Пункт меню
+        # сереет на время многосекундной модалки – приемлемая цена
+        self.act_export.setEnabled(False)
         try:
             dlg = DocxExportDialog(
                 parent=self,
@@ -1664,12 +1691,16 @@ class MainWindow(QMainWindow):
                                  self.ctx_map(), self._owner_titles(),
                                  self.canvas)
             accepted = dlg.exec() == DocxExportDialog.Accepted
+            _lt.trace_line("dlg-accepted" if accepted else "dlg-rejected")
             out = (dlg.exported_path or str(dlg.path_edit.text())) \
                 if accepted else ""
+            if accepted:
+                # вопрос и запуск отчёта – ВНУТРИ пояса: второй
+                # triggered в «шве» вопроса больше не находит входа
+                self._after_docx_export(out)
         finally:
             self._export_running = False
-        if accepted:
-            self._after_docx_export(out)
+            self.act_export.setEnabled(True)
 
     def _after_docx_export(self, path: str) -> None:
         """Задачи 1/3 (сессия 19): что делает окно ПОСЛЕ успешного
@@ -1707,8 +1738,13 @@ class MainWindow(QMainWindow):
         yes = box.addButton("Да", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Нет", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(yes)
+        _lt.trace_line("question-shown")
         box.exec()
-        return box.clickedButton() is yes
+        answer = box.clickedButton() is yes
+        # Сессия 20: трасса всегда включена (launch_trace.log) – без
+        # неё не отличить «не спросили» от «спросили, ответили нет»
+        _lt.trace_line(f"question-answer={'yes' if answer else 'no'}")
+        return answer
 
     def _open_path(self, path: str) -> bool:
         """Задача 3 (сессия 19): показать пользователю готовый отчёт.
@@ -1747,6 +1783,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtGui import QDesktopServices
         ok = bool(QDesktopServices.openUrl(QUrl.fromLocalFile(target)))
         self._log_open_attempt(f"QDesktopServices → {target} ok={ok}")
+        _lt.trace_line("launch-attempt", way="qt", rc=f"{ok}")
         return ok
 
     def _launch_detached_start(self, path: str) -> bool:
@@ -1764,7 +1801,7 @@ class MainWindow(QMainWindow):
         cmd = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
                            "System32", "cmd.exe")
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [cmd, "/c", "start", "", os.path.normpath(path)],
                 cwd=os.path.dirname(path) or None, env=_clean_child_env(),
                 close_fds=True, stdin=subprocess.DEVNULL,
@@ -1772,8 +1809,12 @@ class MainWindow(QMainWindow):
                 creationflags=_DETACHED_FLAGS)
         except OSError as exc:
             self._log_open_attempt(f"cmd start (detached) отказал ({exc})")
+            _lt.trace_line("launch-attempt", way="cmd",
+                           rc=f"fail err={exc}")
             return False
         self._log_open_attempt(f"cmd start detached → {path}")
+        _lt.trace_line("launch-attempt", way="cmd",
+                       rc=f"spawned pid={proc.pid}")
         return True
 
     def _launch_detached_powershell(self, path: str) -> bool:
@@ -1784,7 +1825,7 @@ class MainWindow(QMainWindow):
                           "powershell.exe")
         safe = str(path).replace('"', "")
         try:
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 [ps, "-NoProfile", "-NonInteractive", "-WindowStyle",
                  "Hidden", "-Command", f'Start-Process -FilePath "{safe}"'],
                 cwd=os.path.dirname(path) or None, env=_clean_child_env(),
@@ -1793,8 +1834,12 @@ class MainWindow(QMainWindow):
                 creationflags=_DETACHED_FLAGS)
         except OSError as exc:
             self._log_open_attempt(f"powershell Start-Process отказал ({exc})")
+            _lt.trace_line("launch-attempt", way="powershell",
+                           rc=f"fail err={exc}")
             return False
         self._log_open_attempt(f"powershell Start-Process → {path}")
+        _lt.trace_line("launch-attempt", way="powershell",
+                       rc=f"spawned pid={proc.pid}")
         return True
 
     def _reveal_in_explorer(self, path: str) -> bool:
@@ -1809,15 +1854,19 @@ class MainWindow(QMainWindow):
             os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
         cmd = f'"{explorer}" /select,"{os.path.normpath(path)}"'
         try:
-            subprocess.Popen(cmd, cwd=os.path.dirname(path) or None,
-                             env=_clean_child_env(), close_fds=True,
-                             stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, cwd=os.path.dirname(path) or None,
+                                    env=_clean_child_env(), close_fds=True,
+                                    stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
         except OSError as exc:
             self._log_open_attempt(f"explorer /select отказал ({exc})")
+            _lt.trace_line("launch-attempt", way="explorer",
+                           rc=f"fail err={exc}")
             return False
         self._log_open_attempt(f"explorer /select → {path}")
+        _lt.trace_line("launch-attempt", way="explorer",
+                       rc=f"spawned pid={proc.pid}")
         return True
 
     def _launch_via_startfile(self, path: str) -> bool:
@@ -1828,8 +1877,11 @@ class MainWindow(QMainWindow):
         except (OSError, AttributeError) as exc:
             self._log_open_attempt(f"os.startfile отказал ({exc});"
                                    f" пробую QDesktopServices → {path}")
+            _lt.trace_line("launch-attempt", way="startfile",
+                           rc=f"fail err={exc}")
             return False
         self._log_open_attempt(f"os.startfile → {path}")
+        _lt.trace_line("launch-attempt", way="startfile", rc="ok")
         return True
 
     @staticmethod
