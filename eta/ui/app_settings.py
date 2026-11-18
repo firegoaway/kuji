@@ -39,6 +39,10 @@ regedit, и его выбор больше не зависит от того, к
 
 from __future__ import annotations
 
+import os
+import tempfile
+from pathlib import Path
+
 from PySide6.QtCore import QSettings
 
 ORG = "GraphiczD"
@@ -54,6 +58,7 @@ _MIGRATE_KEYS = (
 )
 
 _installed: bool = False
+_store_dir: tuple = ()
 
 
 def installed() -> bool:
@@ -61,17 +66,66 @@ def installed() -> bool:
     return _installed
 
 
-def install_ini_backend() -> str:
-    """Перевести QSettings на INI (IniFormat + привычный путь %APPDATA%).
+def app_root() -> Path:
+    """Корень программы – каталог с `main.py` и `run_app.cmd`."""
+    return Path(__file__).resolve().parents[2]
 
-    Возвращает путь файла настроек. Идемпотентно. ВАЖНО: вызывать
-    ПОСЛЕ `setOrganizationName`/`setApplicationName` и ДО первого окна.
-    """
-    global _installed
+
+def _writable(dir_path: str) -> bool:
+    """Проверить, что в каталог РЕАЛЬНО можно писать (создать и удалить
+    пробный файл). Без такой проверки выбор хранилища – гадание: на машине
+    заказчика не создавалось НИЧЕГО – ни новых ключей в реестре, ни файла в
+    `%APPDATA%\\GraphiczD` (каталога просто не существовало после запусков)."""
+    try:
+        os.makedirs(dir_path, exist_ok=True)
+        fd, probe = tempfile.mkstemp(prefix="kuji_probe_", dir=dir_path)
+        os.close(fd)
+        os.unlink(probe)
+        return True
+    except OSError:
+        return False
+
+
+def choose_store_dir() -> tuple:
+    """Куда положить файл настроек: (каталог, пояснение для лога).
+
+    Порядок: (1) ПЕРЕНОСИМОЕ хранилище рядом с программой –
+    `<корень>\\settings`: оно заведомо доступно на запись там, где программа
+    вообще запускается, и его видно глазами вместе с проектом; (2) штатный
+    для IniFormat каталог `%APPDATA%\\GraphiczD`. Переносимое идёт первым
+    именно потому, что проверяется на запись до выбора."""
+    portable = str(app_root() / "settings")
+    if _writable(portable):
+        return portable, "portable (рядом с программой)"
+    roaming = os.path.join(os.environ.get("APPDATA") or str(Path.home()), ORG)
+    if _writable(roaming):
+        return roaming, "roaming (%APPDATA%)"
+    return roaming, "fallback (запись недоступна, взят %APPDATA%)"
+
+
+def install_ini_backend(store_dir: str | None = None) -> str:
+    """Перевести QSettings на явный INI-файл и вернуть его путь.
+
+    `store_dir=None` (боевой запуск из `main.py`) – каталог выбирает
+    `choose_store_dir()`; явный каталог нужен тестам, чтобы хранилище
+    осталось герметичным. Идемпотентно. ВАЖНО: вызывать ПОСЛЕ
+    `setOrganizationName`/`setApplicationName` и ДО первого окна."""
+    global _installed, _store_dir
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
-    if not _installed:
-        _installed = True
+    if store_dir is None:
+        store_dir, why = choose_store_dir()
+    else:
+        why = "задан явно (тесты)"
+    _store_dir = (str(store_dir), why)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope,
+                      str(store_dir))
+    _installed = True
     return settings_file()
+
+
+def store_info() -> tuple:
+    """(каталог хранилища, пояснение выбора) – для стартовой диагностики."""
+    return _store_dir or ("", "бэкенд не установлен")
 
 
 def settings() -> QSettings:
@@ -153,6 +207,43 @@ def log_diagnostics() -> dict:
     except Exception:  # noqa: BLE001 – диагностика не ломает запуск
         pass
     return info
+
+
+def log_startup() -> str:
+    """Одна строка старта в `<корень>\\qa_artifacts\\startup.log` – ВСЕГДА,
+    а не только при KUJI_DEBUG_KEYS.
+
+    Зачем: три раунда подряд заказчик сообщал, что настройки не помнятся, а
+    прочитать состояние его хранилища из-за пределов его процесса было
+    нечем. Строка содержит путь файла настроек, причину выбора каталога,
+    признак записи, статус Qt, снимок реестра и фактическое наличие
+    ключей – этого достаточно, чтобы отличить «не пишем» от «пишем не туда».
+    Файл держит последние 200 строк и не растёт вечно."""
+    import time
+
+    from .. import __version__
+    info = diagnostics()
+    st_dir, why = store_info()
+    st = settings()
+    marks = {k: (st.value(k) is not None) for k in
+             ("ui/geometry", "ui/splitter", "ui/last_dir",
+              "export/last_dir", "ui/kb_geometry", "ui/doc_geometry")}
+    line = (f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] v{__version__} "
+            f"store={info.get('store')} why={why} "
+            f"writable={info.get('writable')} status={info.get('status')} "
+            f"registry={info.get('registry_store')} "
+            f"reg_keys={info.get('registry_keys')} keys={marks}")
+    path = app_root() / "qa_artifacts" / "startup.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tail: list[str] = []
+        if path.exists():
+            tail = path.read_text(encoding="utf-8",
+                                  errors="replace").splitlines()[-199:]
+        path.write_text("\n".join(tail + [line]) + "\n", encoding="utf-8")
+    except OSError:
+        pass                      # диагностика не имеет права ломать запуск
+    return line
 
 
 def migrate_from_registry() -> int:

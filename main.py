@@ -45,6 +45,7 @@ def main() -> int:
     moved = app_settings.migrate_from_registry()
     migrate_qsettings()
     app_settings.log_diagnostics()      # в key_debug.log при KUJI_DEBUG_KEYS
+    app_settings.log_startup()          # всегда: qa_artifacts\startup.log
     if moved:
         print(f"[kuji] настройки перенесены из реестра в {store}"
               f" (ключей: {moved})")

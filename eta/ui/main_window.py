@@ -51,6 +51,22 @@ from .left_toolbar import ViewportToolbar
 # Задача 4 (сессия 17, LOCKED): глубина истории отмены
 UNDO_DEPTH = 50
 
+# Каталоги, которые незачем передавать внешним процессам (Word, Проводник):
+# встроенный Python и PySide6 кладут в PATH свои DLL, и унаследовавший их
+# Word начинал вести себя непредсказуемо (см. _open_path)
+_ENV_NOISE = ("runtime", "pyside", "shiboken", "qt")
+
+
+def _clean_child_env() -> dict:
+    """Копия окружения без наших каталогов в PATH – для запуска внешних
+    программ (Проводник, cmd). Остальные переменные, включая APPDATA и
+    USERPROFILE, не трогаются: именно по ним Word ищет свой Normal.dotm."""
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join(
+        p for p in env.get("PATH", "").split(os.pathsep)
+        if p and not any(n in p.lower() for n in _ENV_NOISE))
+    return env
+
 # Задача 4: действия «Правка» – ЕДИНЫЕ на приложение (родитель – сам
 # QApplication), создаются ОДИН раз и dispatch'атся в АКТИВНОЕ окно
 # (или последнее созданное). Пер-оконные ApplicationShortcut-действия
@@ -1390,13 +1406,23 @@ class MainWindow(QMainWindow):
     # ============================ проекты ============================
     def _project_dir_or_desktop(self) -> str:
         """Общий хвост цепочки предзаполнения: папка проекта → Рабочий
-        стол (оба проверяются на существование). Задача 12 (сессия 18),
-        Задача 1 (сессия 19)."""
+        стол. Задача 12 (сессия 18), Задача 1 (сессия 19).
+
+        Сессия 19, раунд замечаний: возврат обязан быть СУЩЕСТВУЮЩИМ
+        каталогом. Иначе QFileDialog получает несуществующий путь и
+        открывает профиль пользователя («C:\\Users\\User»), а инженер
+        каждый раз наново прокликивает путь до проекта."""
         if self._project_path:
             d = os.path.dirname(self._project_path)
             if d and Path(d).is_dir():
                 return d
-        return str(Path.home() / "Desktop")
+        for cand in (Path.home() / "Desktop",
+                     Path.home() / "OneDrive" / "Desktop",
+                     Path.home() / "OneDrive" / "Рабочий стол",
+                     Path.home()):
+            if cand.is_dir():
+                return str(cand)
+        return str(Path.home())
 
     def _dir_hint(self) -> str:
         """Задача 12 (сессия 18, LOCKED): папка предзаполнения ПРОЕКТНЫХ
@@ -1655,13 +1681,17 @@ class MainWindow(QMainWindow):
                     f" Файл сохранен: {out}")
 
     def _ask_open_report(self, path: str) -> bool:
-        """Задача 3 (сессия 19, LOCKED): «Отчет сформирован. Желаете
-        открыть его сейчас?» – Да/Нет. Шов: offscreen-тесты подменяют
-        метод, модалка в прогоне не крутится."""
+        """Задача 3 (сессия 19): вопрос после успешного экспорта. Шов:
+        offscreen-тесты подменяют метод, модалка в прогоне не крутится.
+
+        Формулировка (раунд замечаний, выбор заказчика): «Открыть папку с
+        отчетом?» – потому что «Да» теперь показывает файл в окне Проводника
+        выделенным, а не запускает Word из нашего процесса (именно такой
+        запуск вызывал у Word предупреждение про Normal.dotm)."""
         box = QMessageBox(self)
         box.setWindowTitle("Экспорт завершен")
         box.setIcon(QMessageBox.Icon.Question)
-        box.setText("Отчет сформирован. Желаете открыть его сейчас?")
+        box.setText("Отчет сформирован. Открыть папку с отчетом?")
         yes = box.addButton("Да", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Нет", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(yes)
@@ -1669,29 +1699,31 @@ class MainWindow(QMainWindow):
         return box.clickedButton() is yes
 
     def _open_path(self, path: str) -> bool:
-        """Задача 3 (сессия 19): открыть отчёт системным приложением по
-        умолчанию. Шов для тестов; False – файл открыть не удалось (тогда
-        окно сообщает путь, чтобы пользователь открыл его сам).
+        """Задача 3 (сессия 19): показать пользователю готовый отчёт.
+        Шов для тестов; False – ничего открыть не удалось (тогда окно
+        сообщает путь, чтобы пользователь открыл файл сам).
 
-        Сессия 19, раунд замечаний: Word показывал «в документе
-        Normal.dotm обнаружено содержимое, которое не удалось прочитать»
-        ТОЛЬКО при открытии из программы, а тот же файл из Проводника
-        открывался штатно. Сам пакет отчёта чист (следов чужого шаблона в
-        нём нет – это проверяют export_docx, QA и тесты), значит дело в
-        способе запуска. QDesktopServices.openUrl отдаёт ShellExecute
-        URL-форму пути, os.startfile – обычный путь, но в обоих случаях
-        WINWORD.EXE порождается НАШИМ процессом и наследует его окружение:
-        PATH с каталогами встроенного Python и PySide6, рабочую папку
-        проекта и COM-контекст GUI-потока Qt. Проводник же запускает Word
-        из своей чистой среды Windows.
+        Сессия 19, раунды замечаний. Заказчик измерил трижды: предупреждение
+        Word «в документе Normal.dotm обнаружено содержимое, которое не
+        удалось прочитать» появляется ТОЛЬКО при открытии из программы, тот
+        же файл из Проводника открывается штатно, а зачистка пакета и замена
+        QDesktopServices на os.startfile предупреждение не сняли (в 6.10.1
+        os.startfile к тому же вообще перестал открывать файл). Общее у всех
+        наших способов одно: WINWORD.EXE порождается НАШИМ процессом и
+        наследует его окружение – PATH с каталогами встроенного Python и
+        PySide6, рабочую папку проекта, COM-контекст GUI-потока Qt.
 
-        Поэтому порядок такой: (1) explorer.exe как брокер – ровно тот же
-        путь, что и при двойном щелчке; (2) os.startfile; (3) запасной
-        QDesktopServices. Выбранный способ пишется в key_debug.log строкой
-        «open-report | …», чтобы любая повторная жалоба шла с данными."""
+        Поэтому основной способ теперь – Проводник с выделенным файлом
+        (`explorer /select`), его и выбрал заказчик: Word при этом запускает
+        сам Проводник из чистой среды Windows, предупреждение не возникает,
+        а готовый отчёт сразу виден. Дальше идут запасные способы, каждый –
+        шов, поэтому тесты не порождают реальных процессов. Все попытки
+        пишутся в key_debug.log строкой «open-report | …»."""
         target = os.path.abspath(str(path))
         if os.name == "nt":
-            if self._launch_via_explorer(target):
+            if self._reveal_in_explorer(target):
+                return True
+            if self._launch_via_cmd_start(target):
                 return True
             if self._launch_via_startfile(target):
                 return True
@@ -1701,36 +1733,50 @@ class MainWindow(QMainWindow):
         self._log_open_attempt(f"QDesktopServices → {target} ok={ok}")
         return ok
 
-    def _launch_via_explorer(self, path: str) -> bool:
-        """Открыть файл через explorer.exe (брокер Проводника). Шов: тесты
-        подменяют метод, чтобы никогда не порождать настоящие процессы.
+    def _reveal_in_explorer(self, path: str) -> bool:
+        """Показать файл в окне Проводника выделенным (`explorer /select`).
 
-        Окружение передаётся очищенным от каталогов встроенного Python и
-        PySide6, чтобы Word не подхватывал наши библиотеки вместо своих."""
+        Шов. Флаг CREATE_NO_WINDOW намеренно НЕ передаётся: по замеру
+        заказчика вызов `explorer.exe <файл>` с этим флагом молча
+        проглатывался оболочкой, а для GUI-процесса он и не нужен.
+        Окружение передаётся очищенным от наших каталогов."""
         import subprocess
         explorer = os.path.join(
             os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
-        env = os.environ.copy()
-        noise = ("runtime", "pyside", "shiboken", "qt")
-        env["PATH"] = os.pathsep.join(
-            p for p in env.get("PATH", "").split(os.pathsep)
-            if p and not any(n in p.lower() for n in noise))
+        cmd = f'"{explorer}" /select,"{os.path.normpath(path)}"'
         try:
-            subprocess.Popen([explorer, os.path.normpath(path)],
-                             cwd=os.path.dirname(path) or None, env=env,
-                             close_fds=True, stdin=subprocess.DEVNULL,
+            subprocess.Popen(cmd, cwd=os.path.dirname(path) or None,
+                             env=_clean_child_env(), close_fds=True,
+                             stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL,
-                             creationflags=0x08000000)   # CREATE_NO_WINDOW
+                             stderr=subprocess.DEVNULL)
         except OSError as exc:
-            self._log_open_attempt(f"explorer.exe отказал ({exc});"
-                                   f" пробую os.startfile → {path}")
+            self._log_open_attempt(f"explorer /select отказал ({exc})")
             return False
-        self._log_open_attempt(f"explorer.exe → {path}")
+        self._log_open_attempt(f"explorer /select → {path}")
+        return True
+
+    def _launch_via_cmd_start(self, path: str) -> bool:
+        """Запасной способ: `cmd /c start "" "<файл>"` в очищенном
+        окружении – открывает файл ассоциированным приложением, но Word
+        запускает не наш процесс напрямую. Шов."""
+        import subprocess
+        try:
+            subprocess.Popen(
+                ["cmd.exe", "/c", "start", "", os.path.normpath(path)],
+                cwd=os.path.dirname(path) or None, env=_clean_child_env(),
+                close_fds=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=0x08000000)          # CREATE_NO_WINDOW
+        except OSError as exc:
+            self._log_open_attempt(f"cmd start отказал ({exc})")
+            return False
+        self._log_open_attempt(f"cmd start → {path}")
         return True
 
     def _launch_via_startfile(self, path: str) -> bool:
-        """Обычный ShellExecute из нашего процесса (второй пояс). Шов."""
+        """Обычный ShellExecute из нашего процесса (последний пояс на
+        Windows). Шов."""
         try:
             os.startfile(path, "open")
         except (OSError, AttributeError) as exc:
