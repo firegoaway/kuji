@@ -27,10 +27,9 @@ qa_artifacts\\launch_trace.log. События:
   * `overwrite-ask path=<файл>` / `overwrite-answer=<yes|no>` – вопрос
     о перезаписи существующего файла (сессия 20, требование заказчика);
   * `dlg-accepted` / `dlg-rejected` – чем закончился диалог;
-  * `question-shown` / `question-answer=<open|folder|close>` – вопрос об
-    открытии (сессия 20, раунд 6: три кнопки – «Открыть» / «Показать в
-    папке» / «Закрыть»; folder – Проводник с выделенным файлом,
-    измеренно чистый путь при политике «script→Office»);
+  * `question-shown` / `question-answer=<yes|no>` – вопрос об открытии
+    («Отчет сформирован. Желаете открыть его сейчас?», Да/Нет; раунд 8
+    вернул две кнопки после проверки на чистой Windows 10);
   * `launch-attempt way=<shell-com|task|winword|cmd|powershell|explorer|
     explorer-select|startfile|qt> rc=<ok|fail err=…|spawned pid=…>` –
     КАЖДАЯ попытка открыть отчёт: по этим строкам видно, какой способ

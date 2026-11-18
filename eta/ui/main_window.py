@@ -1788,61 +1788,37 @@ class MainWindow(QMainWindow):
         # export/last_dir (ui/last_dir – про проекты, блок изоляции)
         self._remember_export_dir(out)
         self.statusBar().showMessage(f"DOCX: {out}", 8000)
-        # Задача 3 (сессия 19; три кнопки – сессия 20, раунд 6, решение
-        # заказчика): вопрос только по факту созданного файла; все шаги –
-        # швы для offscreen-тестов
-        if not Path(out).is_file():
-            return
-        choice = self._ask_open_report(out)
-        if choice == "open":
+        # Задача 3 (сессия 19; сессия 20, раунд 8 – по указанию
+        # заказчика после проверки на чистой Windows 10): вопрос только
+        # по факту созданного файла; шаги – швы для offscreen-тестов
+        if Path(out).is_file() and self._ask_open_report(out):
             if not self._open_path(out):
                 QMessageBox.information(
                     self, "Экспорт завершен",
                     "Не удалось открыть отчет автоматически."
                     f" Файл сохранен: {out}")
-        elif choice == "folder":
-            # единственный путь, ИЗМЕРЕННО чистой работающий на машине
-            # заказчика при политике «script→Office» (раунд 4, 6.10.2)
-            if not self._reveal_in_explorer(out):
-                QMessageBox.information(
-                    self, "Экспорт завершен",
-                    "Не удалось открыть папку с отчетом."
-                    f" Файл сохранен: {out}")
 
-    def _ask_open_report(self, path: str) -> str:
-        """Сессия 19 → сессия 20, раунд 6 (решение заказчика): «Отчет
-        сформирован. Открыть файл или показать его в папке?» – ТРИ
-        кнопки: «Открыть» (по умолчанию и в фокусе), «Показать в
-        папке» (Проводник с выделенным файлом – единственный способ,
-        чисто работающий на машине заказчика при политике безопасности,
-        ломающей Word с питон-предками) и «Закрыть». Возвращает
-        'open' | 'folder' | 'close'. Шов: offscreen-тесты подменяют
-        метод, модалка в прогоне не крутится. Прежнее Да/Нет (решение 4
-        сессии 19) заменено именно этим вопросом по явному указанию
-        заказчика 18.11.2026."""
+    def _ask_open_report(self, path: str) -> bool:
+        """Задача 3 (сессия 19, LOCKED; раунд 8 вернул формулировку):
+        «Отчет сформирован. Желаете открыть его сейчас?» – Да/Нет,
+        «Да» по умолчанию и в фокусе; «Да» открывает сам отчёт
+        (`_open_path`, цепочка запуска). Промежуточный трёхкнопочный
+        вариант с «Показать в папке» (раунды 6–7) снят по решению
+        заказчика 18.11.2026: на чистой Windows 10 кнопка «Да»
+        открывает отчёт идеально, локальная проблема машины
+        разбирается отдельно. Шов: offscreen-тесты подменяют метод."""
         box = QMessageBox(self)
         box.setWindowTitle("Экспорт завершен")
         box.setIcon(QMessageBox.Icon.Question)
-        box.setText("Отчет сформирован. Открыть файл или показать"
-                    " его в папке?")
-        open_btn = box.addButton("Открыть",
-                                 QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Показать в папке",
-                      QMessageBox.ButtonRole.ActionRole)
-        box.addButton("Закрыть", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(open_btn)
+        box.setText("Отчет сформирован. Желаете открыть его сейчас?")
+        yes = box.addButton("Да", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Нет", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(yes)
         _lt.trace_line("question-shown")
         box.exec()
-        clicked = box.clickedButton()
-        if clicked is open_btn:
-            answer = "open"
-        elif clicked is not None and clicked.text() == "Показать в папке":
-            answer = "folder"
-        else:
-            answer = "close"
-        # Сессия 20: трасса всегда включена (launch_trace.log) – без
-        # неё не отличить «не спросили» от «закрыли»
-        _lt.trace_line(f"question-answer={answer}")
+        answer = box.clickedButton() is yes
+        # Сессия 20: трасса всегда включена (launch_trace.log)
+        _lt.trace_line(f"question-answer={'yes' if answer else 'no'}")
         return answer
 
     def _open_path(self, path: str) -> bool:
