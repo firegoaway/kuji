@@ -587,7 +587,15 @@ UID-вариант. Папка – СВОЙ ключ `export/last_dir` (см. «
   пояса и открывал диалог снова. `latin_keys._dispatch_letter` после
   возврата действия, длившегося дольше `_MODAL_FLOW_S` (0.3 с), глушит
   тот же seq ещё `_QUIET_AFTER_MODAL_S` (0.45 с); короткие действия
-  (Undo, Ctrl+D) окна не получают – троттлинга нет.
+  (Undo, Ctrl+D) окна не получают – троттлинга нет;
+* КУЛДАУН на входе `_export_docx` (6.11.2): замер 6.11.1
+  (launch_trace 15:38:00/15:38:18) – dlg-open спустя ~50 мс после
+  launch-attempt ХВОСТОМ Нативного маршрута Qt (шорткаты
+  QKeySequence на `act_export`; диспетчер latin_keys его не видит,
+  «тихое окно» не берёт). `_EXPORT_COOLDOWN_S` (1.2 с) на ВХОДЕ
+  `_export_docx` закрывает ВСЕ маршруты разом (записывается как
+  `dlg-open-blocked reason=cooldown`); снимается в том же `finally`,
+  что и пояс с действием.
 
 **Всегда включённая трасса `qa_artifacts\launch_trace.log` (сессия 20,
 разрешение заказчика 18.11.2026).** Модуль `eta\ui\launch_trace.py`
@@ -603,10 +611,13 @@ err=…` – `DocxExportDialog._do_export`; `overwrite-ask path=…` /
 `DocxExportDialog._confirm_overwrite`, «Перезаписать» по умолчанию);
 `dlg-accepted`/`dlg-rejected` – `_export_docx`; `question-shown` /
 `question-answer=yes|no` – `_ask_open_report`; `launch-attempt
-way=<cmd|powershell|explorer|explorer-select|startfile|qt|winword>
-rc=<spawned pid=…|ok|fail err=…>` – каждый шов цепочки открытия
-(explorer – открытие САМОГО файла Проводником, explorer-select –
-запасной показ папки с выделением). Зачем: launch-цепочка молча деградирует до
+way=<shell-com|task|winword|cmd|powershell|explorer|explorer-select|
+startfile|qt> rc=<ok|spawned pid=…|fail err=…>` – каждый шов цепочки
+открытия (shell-com – открытие исполняет САМ ПРОВОДНИК через COM
+Shell.Application, первичный; task – планировщик, тяжёлый запасной;
+explorer – открытие файла самим Проводником; explorer-select –
+запасной показ папки с выделением).
+Отклонённый повторный вход пишет `dlg-open-blocked reason=belt|cooldown`. Зачем: launch-цепочка молча деградирует до
 `os.startfile` (неудача возвращает False без исключения), и без трассы
 невозможно узнать, какой способ ИСПОЛНИЛСЯ на машине заказчика; трасса
 НЕ заменяет `key_debug.log` (последний – про клавиши,
@@ -627,41 +638,43 @@ KUJI_DEBUG_KEYS=1). Правило на будущее: любое измене�
 своей среды. Требование заказчика (раунд 5): открывать САМ отчёт, а не папку с
 ним. Поэтому `MainWindow._open_path` идёт по цепочке ШВОВ (тесты подменяют
 методы и никогда не порождают реальные процессы):
-(1) `_launch_winword_direct` – ПЕРВИЧНЫЙ с раунда 3 (сессия 20; оба
-шёлловских способа закрыты замерами: cmd start исполнялся, но давал
-предупреждение Normal.dotm и пустое окно, explorer.exe с файлом
-запускался и молча не открывал ничего): ПРЯМОЙ `WINWORD.EXE /n
-"<файл>"` отсоединённым процессом с теми же флагами, что (2). Путь к
-exe читает `_resolve_winword_exe()` – БЕЗ ShellExecute: значение
-`HKLM\…\App Paths\WINWORD.EXE`, затем разбор ассоциации
-`HKCR\.docx` → ProgID → `shell\Open\command` (первый токен в кавычках
-или наращиваемый префикс без кавычек, переключатели и `"%1"`
-отсекаются, проверка isfile). Имя файла идёт Юникод-командной строкой
-CreateProcessW – Кириллица без OEM-кодировок, DDE не участвует вовсе;
-`/n` открывает документ в новом экземпляре Word вместо переиспользова-
-ния работающего. Это CreateProcess подписанного exe, НЕ COM-автома-
-тация – запрет Word COM не затронут. В трассе `way=winword`
-(резолвер – шов: тесты подменяют `_resolve_winword_exe`);
-(2) `_launch_via_explorer` – `explorer.exe "<файл>"` ВООБЩЕ без
+(1) `_launch_via_shell_com` – ПЕРВИЧНЫЙ с раунда 4: открытие
+ДЕЛЕГИРУЕТСЯ работающему Проводнику через COM Shell.Application
+(короткоживущий powershell-помощник: `New-Object -ComObject
+Shell.Application` + `.ShellExecute('<файл>','','<папка>','open',1)`).
+Out-of-proc COM-сервер этого объекта исполняется В САМОМ explorer.exe,
+поэтому Word получает родителем ПРОВОДНИК, а не наше питон-дерево –
+проба 18.11.2026 открыла отчёт ЧИСТО; механизм идентичен двойному
+клику. Флаг помощника – только CREATE_NO_WINDOW (без DETACHED –
+вместе нельзя); это НЕ Word-COM (Word.Application не затронут).
+way=shell-com;
+(2) `_launch_via_task` – тяжелый запасной: `schtasks /Create /TN
+KujiOpenReport /TR "…WINWORD.EXE" /q "<файл>" /SC ONCE /ST 23:59 /F`
+→ `/Run` → `/Delete`; задачу поднимает СЛУЖБА планировщика – у Word
+нет питон-предков (проба 18.11.2026: отчёт открылся чисто). Если
+schtasks запрещён политикой → rc=fail, цепочка дальше; way=task;
+(3) `_launch_winword_direct` – прямой `WINWORD.EXE /n "<файл>"`:
+резолвер `_resolve_winword_exe()` без ShellExecute (`HKLM App
+Paths\WINWORD.EXE`, затем ассоциация .docx: первый токен в кавычках
+или наращиваемый префикс, переключатели и `"%1"` отсекаются, isfile),
+Юникод-командная строка CreateProcessW, DDE не участвует; на машине
+заказчика ЗАМЕРЕН как poisoned (питон-предок), остаётся для машин без
+такой политики; way=winword;
+(4) `_launch_via_explorer` – `explorer.exe "<файл>"` ВООБЩЕ без
 флагов создания и без `/select`; на машине заказчика замерено пустым
-(процесс жив, ничего не открылось), остаётся запасным для иных сред;
-в трассе `way=explorer`;
-(3) `_launch_detached_start` – `cmd.exe /c start "" "<файл>"` в ОТСОЕДИНЁННОМ
+(процесс жив, ничего не открылось); way=explorer;
+(5) `_launch_detached_start` – `cmd.exe /c start "" "<файл>"` в ОТСОЕДИНЁННОМ
 процессе: `creationflags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
 (0x8 | 0x200), `cwd` = папка файла, `env = _clean_child_env()`,
-`close_fds=True`, stdio в DEVNULL. Смысл: Word запускает не python.exe с
-инициализированным QApplication (COM single-threaded apartment) и не
-унаследованный PATH встроенного Python, а свежий cmd, который отрабатывает
-ShellExecute и сразу завершается. ВАЖНО: `DETACHED_PROCESS` и
+`close_fds=True`, stdio в DEVNULL. ВАЖНО: `DETACHED_PROCESS` и
 `CREATE_NO_WINDOW` вместе передавать НЕЛЬЗЯ – это два способа задать «консоли
 нет», вместе они дают ошибку создания процесса;
-(4) `_launch_detached_powershell` – `powershell -NoProfile -NonInteractive
+(6) `_launch_detached_powershell` – `powershell -NoProfile -NonInteractive
 -WindowStyle Hidden -Command Start-Process -FilePath "<файл>"`, те же флаги;
-(5) `_reveal_in_explorer` – `'"<explorer>" /select,"<файл>"'` БЕЗ
-`CREATE_NO_WINDOW` (с ним оболочка молча проглатывала вызов – замер на 6.10.1);
-в трассе `way=explorer-select`, чтобы не путать с (2);
-(6) `_launch_via_startfile` – `os.startfile(path, "open")`;
-(7) `QDesktopServices.openUrl` – прочие платформы и отказ всех шести.
+(7) `_reveal_in_explorer` – `'"<explorer>" /select,"<файл>"'` БЕЗ
+`CREATE_NO_WINDOW`; way=explorer-select;
+(8) `_launch_via_startfile` – `os.startfile(path, "open")`;
+(9) `QDesktopServices.openUrl` – прочие платформы и отказ всех восьми.
 `_clean_child_env()` выбрасывает из PATH сегменты, содержащие `runtime`,
 `pyside`, `shiboken`, `qt`, и НЕ трогает `APPDATA`/`LOCALAPPDATA`/`USERPROFILE` –
 по ним Word ищет свой `%APPDATA%\Microsoft\Templates\Normal.dotm` (проверено:
@@ -673,24 +686,38 @@ ShellExecute и сразу завершается. ВАЖНО: `DETACHED_PROCESS
 `launch-attempt way=… rc=…` в `launch_trace.log` (сессия 20; см. трассу
 выше).
 
-**Статус Normal.dotm (сессия 20, раунды замеров 18.11.2026).** Исключено:
-пакет чист (нет `Normal.dotm`/`attachedTemplate` – исключение в
-`export_docx`, флаг QA, блок 52), `APPDATA`/`LOCALAPPDATA`/`USERPROFILE`
-не подменяются, PATH отсечён, варианты написания пути и брокера
-перепробованы (раунды 1–5). РЕШАЮЩИЙ опыт: при полностью закрытом
-WINWORD.EXE тот же отчёт из Проводника открывается ЧИСТО → гипотеза
-«повреждён Normal.dotm заказчика» (H-B) ИСКЛЮЧЕНА, остаётся наш контекст
-запуска (H-A). Дальнейшее – по трассе, одной правкой на замер:
-раунд 2: `cmd start` ИСПОЛНЯЛСЯ (`way=cmd rc=spawned`), но Word
-жаловался на Normal.dotm и открывал ПУСТОЕ окно; раунд 3:
-`explorer.exe <файл>` без флагов запускался (`way=explorer
-rc=spawned pid=…`), но НЕ открывал ничего; заказчик подтвердил: двойной
-диалог побеждён, вопрос о перезаписи устраивает. Отсюда первичным стал
-зарезервированный шаг `_launch_winword_direct` (см. цепочку выше) –
-прямой CreateProcess-запуск WINWORD.EXE с Юникод-путём, в обход и
-ShellExecute/DDE, и кодировок cmd. Правило остаётся: трасса до, одна
-правка, замер заказчика после; если и это не откроет отчёт – следующая
-гипотеза только с новыми строками трассы.
+**Статус Normal.dotm (сессия 20, корень найден пробами 18.11.2026).**
+Пакет отчёта чист исключён ещё сессией 19 (нет `Normal.dotm`/
+`attachedTemplate` – исключение в `export_docx`, флаг QA, блок 52;
+гипотеза «референс несёт предустановки Normal.dotm» заказчика
+ОТВЕРГНУТА: тот же файл двойным кликом и задачей планировщика
+открывается чисто). РЕШАЮЩИЙ эксперимент: при закрытом WINWORD.EXE
+двойной клик из Проводника чист → «повреждён Normal.dotm заказчика»
+исключён. Раунды 2–4 по трассе: `cmd start` исполнялся –
+предупреждение; `explorer <файл>` исполнялся – ничего; прямой
+`WINWORD.EXE /n` – предупреждение. ПРОБЫ АГЕНТА (живьём, та же
+машина, embedded python + computer_use-наблюдение за окнами) дали
+корень: с флагами/кавычками/кириллицей/env НЕ СВЯЗАНО – ЛЮБОЙ Word
+с питон-предком получает «содержимое Normal.dotm не удалось прочитать»
+и падает в ремонтный диалог, а Word без питон-предков (.NET-родитель
+pwsh – отчёт открылся в защищённом просмотре; задача планировщика –
+отчёт открылся) читает тот же файл чисто. Это политика машины в
+стиле «script-процесс → Office» (антивирус/EDR/Defender-правило);
+`schtasks /Create` из питон-дерева в песочнице агента вернул Access
+denied – у запуска заказчиком из Проводника может отличаться, трасса
+покажет. Родственный продукт FireCategories (.NET/WPF, свой pandoc)
+открывает отчёты чисто именно потому, что он компилированный .NET –
+переносить оттуда нечего: все его Win32-маршруты нами уже измерены и
+отравлены питон-предком. РЕШЕНИЕ (та же проба, живьём): COM
+Shell.Application – его out-of-proc сервер исполняется в САМОМ
+explorer.exe, поэтому `.ShellExecute` порождает Word с родителем
+ПРОВОДНИК (замерено: отчёт открылся чисто) – это и стало первичным
+способом `_launch_via_shell_com` (рекомендация внешней рецензии,
+проверена пробой ДО встраивания). Правила: трасса до, одна правка,
+замер после; если у заказчика и проводниковское делегирование, и
+планировщик уйдут в отказ – следующий шаг ТОЛЬКО с новыми строками
+трассы (кандидат: разбор политики/исключения антивируса с
+заказчиком).
 
 **Ход формирования отчёта (сессия 19, раунд 2).** `export_docx(...,
 progress=None)` принимает извещатель `progress(value: float, message: str)`

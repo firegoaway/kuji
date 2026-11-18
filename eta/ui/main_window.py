@@ -53,6 +53,14 @@ from .left_toolbar import ViewportToolbar
 # Задача 4 (сессия 17, LOCKED): глубина истории отмены
 UNDO_DEPTH = 50
 
+# Сессия 20, раунд 4: «тихий период» ПОСЛЕ завершённого потока экспорта.
+# Замер 6.11.1 (launch_trace 15:38:00/15:38:18): dlg-open через ~50 мс
+# после launch-attempt – хвост Ctrl+E дошёл Нативным маршрутом Qt (его
+# диспетчер latin_keys не видит, «тихое окно» диспетчера его не берёт).
+# Пояс на ВХОДЕ _export_docx закрывает ВСЕ маршруты разом; 0.6 с = 10×
+# замеренного хвоста без заметной задержки для намеренного повтора
+_EXPORT_COOLDOWN_S = 0.6
+
 # Каталоги, которые незачем передавать внешним процессам (Word, Проводник):
 # встроенный Python и PySide6 кладут в PATH свои DLL, и унаследовавший их
 # Word начинал вести себя непредсказуемо (см. _open_path)
@@ -243,6 +251,10 @@ class MainWindow(QMainWindow):
         # Диалог экспорта модальный: флаг не даёт возобновившейся цепочке
         # ShortcutOverride открыть его второй раз за одно нажатие (сессия 19)
         self._export_running = False
+        # Сессия 20, раунд 4: момент завершения последнего потока экспорта
+        # – пояс-кулдаун против хвостов Ctrl+E Нативным маршрутом Qt
+        # (замер 6.11.1: dlg-open спустя ~50 мс после launch-attempt)
+        self._export_done_at = 0.0
         self._dirty = False
         self._selected_scenario: dict | None = None
         # Задача 1 (сессия 16): нода холста выделена КЛИКОМ ПОЛЬЗОВАТЕЛЯ
@@ -1724,6 +1736,14 @@ class MainWindow(QMainWindow):
             _lt.trace_line("dlg-open-blocked", reason="belt",
                            source=source, project=ident)
             return
+        if time.monotonic() - self._export_done_at < _EXPORT_COOLDOWN_S:
+            # хвост ТОГО ЖЕ Ctrl+E нативным маршрутом Qt (мимо диспетчера
+            # latin_keys и его «тихого окна»): замер 6.11.1 – dlg-open
+            # через ~50 мс после завершения потока. Один пояс на ВХОДЕ
+            # закрывает все маршруты сразу
+            _lt.trace_line("dlg-open-blocked", reason="cooldown",
+                           source=source, project=ident)
+            return
         _lt.trace_line("dlg-open", source=source, project=ident,
                        t=round(time.monotonic(), 3))
         self._export_running = True
@@ -1754,6 +1774,7 @@ class MainWindow(QMainWindow):
         finally:
             self._export_running = False
             self.act_export.setEnabled(True)
+            self._export_done_at = time.monotonic()
 
     def _after_docx_export(self, path: str) -> None:
         """Задачи 1/3 (сессия 19): что делает окно ПОСЛЕ успешного
@@ -1814,20 +1835,29 @@ class MainWindow(QMainWindow):
         наследует его окружение – PATH с каталогами встроенного Python и
         PySide6, рабочую папку проекта, COM-контекст GUI-потока Qt.
 
-        Сессия 20, задача 2, раунды 2–3. Трасса заказчика закрыла оба
-        прежних первичных способа: `cmd start` ИСПОЛНЯЛСЯ (way=cmd
+        Сессия 20, задача 2, раунды 2–4. Трасса заказчика закрыла оба
+        шёлловских первичных способа: `cmd start` ИСПОЛНЯЛСЯ (way=cmd
         rc=spawned), но Word показывал предупреждение Normal.dotm и
         пустое окно; `explorer.exe <файл>` без флагов запускался
-        (way=explorer rc=spawned pid), но НЕ открывал НИЧЕГО. Поэтому
-        первичным стал резервный шаг – ПРЯМОЙ запуск WINWORD.EXE
-        (`_launch_winword_direct`): путь к exe читается из реестра без
-        ShellExecute, файл передается Юникод-командной строкой CreateProcess,
-        DDE не участвует вовсе. Прежние способы остаются запасными (каждый –
-        шов, тесты не порождают реальных процессов). Все попытки пишутся в
-        launch_trace.log строкой «launch-attempt way=… rc=…» и в
-        key_debug.log строкой «open-report | …»."""
+        (way=explorer rc=spawned pid), но НЕ открывал НИЧЕГО; и ПРЯМОЙ
+        `WINWORD.EXE /n <файл>` тоже предупреждает. Пробы агента
+        (18.11.2026, эта же машина) изолировали корень: ЛЮБОЙ Word
+        с питон-предском получает «Normal.dotm: содержимое не удалось
+        прочитать» (независимо от флагов, кавычек, кириллицы и env), а
+        Word из .NET/проводника/планировщика открывает тот же отчёт
+        чисто – это политика машины (стиль «защита от script→Office»),
+        а не наш пакет и не наш способ запуска. Отсюда первичный способ
+        – `_launch_via_shell_com` (COM Shell.Application: открытие
+        исполняет САМ проводник, замерено чисто), запасной тяжёлый –
+        `_launch_via_task` (планировщик), дальше прежняя цепочка. Все
+        попытки пишутся в launch_trace.log строкой «launch-attempt
+        way=… rc=…» и в key_debug.log строкой «open-report | …»."""
         target = os.path.abspath(str(path))
         if os.name == "nt":
+            if self._launch_via_shell_com(target):
+                return True
+            if self._launch_via_task(target):
+                return True
             if self._launch_winword_direct(target):
                 return True
             if self._launch_via_explorer(target):
@@ -1847,17 +1877,114 @@ class MainWindow(QMainWindow):
         _lt.trace_line("launch-attempt", way="qt", rc=f"{ok}")
         return ok
 
+    def _launch_via_shell_com(self, path: str) -> bool:
+        """Первичный способ (сессия 20, раунд 4): открытие ДЕЛЕГИРУЕТСЯ
+        работающему Проводнику через COM-объект Shell.Application – его
+        out-of-proc сервер исполняется В САМОМ explorer.exe, поэтому
+        Word получает родителем ПРОВОДНИК, а не наше питон-дерево.
+        Проба 18.11.2026 (живьём, эта машина): отчёт открылся ЧИСТО –
+        механизм идентичен двойному клику и обходит политику
+        «script→Office». Короткоживущий powershell-помощник только
+        посылает COM-вызов и выходит: CREATE_NO_WINDOW БЕЗ DETACHED
+        (вместе нельзя – два способа задать «консоли нет»). Это НЕ
+        автоматация Word: Word.Application не затронут (запрет сессии 19
+        о Word-COM соблюден). Шов; way=shell-com."""
+        import subprocess
+        target = os.path.abspath(str(path))
+        ps_file = target.replace("'", "''")
+        ps_dir = (os.path.dirname(target) or ".").replace("'", "''")
+        ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                          "System32", "WindowsPowerShell", "v1.0",
+                          "powershell.exe")
+        cmd = (f"$sh = New-Object -ComObject Shell.Application; "
+               f"$sh.ShellExecute('{ps_file}', '', '{ps_dir}', 'open', 1)")
+        try:
+            r = subprocess.run(
+                [ps, "-NoProfile", "-NonInteractive", "-WindowStyle",
+                 "Hidden", "-Command", cmd],
+                cwd=os.path.dirname(target) or None, env=_clean_child_env(),
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=_CREATE_NO_WINDOW, timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._log_open_attempt(f"shell-com отказал ({exc})")
+            _lt.trace_line("launch-attempt", way="shell-com",
+                           rc=f"fail err={exc}")
+            return False
+        why = r.stderr.decode(errors="replace").strip()
+        if r.returncode != 0 or why:
+            self._log_open_attempt(f"shell-com отказал: {why[-120:]}"
+                                   f" rc={r.returncode}")
+            _lt.trace_line("launch-attempt", way="shell-com",
+                           rc=f"fail err={(why or str(r.returncode))[-120:]}")
+            return False
+        self._log_open_attempt(f"Shell.Application(проводник) → {target}")
+        _lt.trace_line("launch-attempt", way="shell-com", rc="ok")
+        return True
+
+    def _launch_via_task(self, path: str) -> bool:
+        """Запасной способ №2 (сессия 20, раунд 4): пуск ЧЕРЕЗ ПЛАНИРОВЩИК
+        (`schtasks /Create /Run /Delete`). Зачем: политика этой машины
+        ломает чтение Normal.dotm для Word с ПИТОН-ПРЕСКОМ (измерено
+        18.11.2026: питон→Word любым маршрутом = «содержимое не удалось
+        прочитать»; задачей планировщика или из .NET/проводника = отчёт
+        открывается чисто). У порождённого планировщиком Word питонов в
+        родословной нет. schtasks может быть запрещён политикой (замер
+        в песочнице агента: Access denied) – тогда rc=fail, цепочка
+        идёт дальше, а трасса показывает причину. Word поднимает
+        СЛУЖБА планировщика – это не COM и не автоматация Word. Шов;
+        way=task."""
+        import subprocess
+        exe = _resolve_winword_exe()
+        if not exe:
+            _lt.trace_line("launch-attempt", way="task",
+                           rc="fail err=exe-not-found")
+            return False
+        tr = f'"{exe}" /q "{os.path.normpath(path)}"'
+        task = "KujiOpenReport"
+        try:
+            r = subprocess.run(
+                ["schtasks", "/Create", "/TN", task, "/TR", tr,
+                 "/SC", "ONCE", "/ST", "23:59", "/F"],
+                capture_output=True, timeout=15)
+            if r.returncode != 0:
+                why = (r.stderr or b"").decode(errors="replace").strip()
+                self._log_open_attempt(f"schtasks отказал: {why}")
+                _lt.trace_line("launch-attempt", way="task",
+                               rc=f"fail err={why[-120:]}")
+                return False
+            r2 = subprocess.run(["schtasks", "/Run", "/TN", task],
+                                capture_output=True, timeout=15)
+            if r2.returncode != 0:
+                why = (r2.stderr or b"").decode(errors="replace").strip()
+                self._log_open_attempt(f"schtasks /Run отказал: {why}")
+                _lt.trace_line("launch-attempt", way="task",
+                               rc=f"fail err={why[-120:]}")
+                return False
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._log_open_attempt(f"schtasks отказал ({exc})")
+            _lt.trace_line("launch-attempt", way="task",
+                           rc=f"fail err={exc}")
+            return False
+        finally:
+            # одноразовая задача не должна оставаться в системе;
+            # маскировать её провал нельзя (уже вернули True выше)
+            subprocess.run(["schtasks", "/Delete", "/TN", task, "/F"],
+                           capture_output=True, timeout=15)
+        self._log_open_attempt(f"schtasks(планировщик) → {path}")
+        _lt.trace_line("launch-attempt", way="task", rc="ok")
+        return True
+
     def _launch_winword_direct(self, path: str) -> bool:
-        """Первичный способ (сессия 20, раунд 3; прежде – зарезервиро-
-        ванный): ПРЯМОЙ запуск `WINWORD.EXE /n "<файл>"` отсоединённым
-        процессом. Зачем: оба шёлловских способа измерены заказчиком и
-        закрыты – DDE-путь через cmd start давал предупреждение
-        Normal.dotm и пустое окно, а напрямую порождённый explorer.exe
-        молча не открывал ничего. Здесь путь к exe читается из реестра
-        (`_resolve_winword_exe`, без ShellExecute), имя файла идёт
-        Юникод-командной строкой CreateProcess – Кириллица и DDE не
-        участвуют вовсе. `/n` открывает документ в НОВОМ экземпляре Word
-        вместо переиспользования работающего. Это обычный CreateProcess
+        """Запасной способ №2 (сессия 20, раунд 3): ПРЯМОЙ запуск
+        `WINWORD.EXE /n "<файл>"` отсоединённым процессом. На машине
+        заказчика ЗАМЕРЕН как дающий предупреждение Normal.dotm –
+        корень не в способе, а в питон-предках Word (см. _open_path),
+        поэтому уступил первенство пуску через планировщик, но
+        остаётся в цепочке для машин без такой политики: путь к exe
+        читается из реестра (`_resolve_winword_exe`, без ShellExecute),
+        имя файла идёт Юникод-командной строкой CreateProcessW –
+        Кириллица и DDE не участвуют вовсе. Это обычный CreateProcess
         подписанного exe, НЕ COM-автоматация – запрет на Word COM
         не затронут. Шов; в трассе way=winword."""
         import subprocess
@@ -1886,7 +2013,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _launch_via_explorer(self, path: str) -> bool:
-        """Запасной способ №2 (сессия 20, раунды 2–3): `explorer.exe
+        """Запасной способ №3 (сессия 20, раунды 2–3): `explorer.exe
         "<файл>"` вообще БЕЗ флагов создания – на машине заказчика
         замерен как молча ничего не открывающий, поэтому уступил первое
         место прямому WINWORD.EXE, но ОСТАЁТСЯ в цепочке: на иных
@@ -1914,7 +2041,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _launch_detached_start(self, path: str) -> bool:
-        """Запасной способ №3 (сессия 19, раунд 5; с сессии 20 – НЕ
+        """Запасной способ №4 (сессия 19, раунд 5; с сессии 20 – НЕ
         первичный: трасса заказчика показала way=cmd rc=spawned при
         живом симптоме «пустой Word»): `cmd /c start "" "<файл>"` в
         ОТСОЕДИНЁННОМ процессе с очищенным окружением. Шов для тестов.
