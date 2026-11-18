@@ -179,6 +179,23 @@ class DocxExportDialog(QDialog):
         dlg.show_progress()
         return dlg
 
+    def _confirm_overwrite(self, path: str) -> bool:
+        """Сессия 20 (требование заказчика): существующий файл НЕ
+        перезаписывается молча. Спрашиваем перед записью; «Перезаписать»
+        по умолчанию – запись уже заказана кнопкой «Экспортировать», а
+        повторный экспорт того же проекта – обычное дело. Шов для
+        offscreen-тестов (настоящая модалка там невозможна)."""
+        from PySide6.QtWidgets import QMessageBox
+        box = QMessageBox(self)
+        box.setWindowTitle("Экспорт DOCX")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(f"Файл уже существует:\n{path}\nПерезаписать его?")
+        yes = box.addButton("Перезаписать", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(yes)
+        box.exec()
+        return box.clickedButton() is yes
+
     def _do_export(self) -> None:
         path = self.path_edit.text().strip()
         if not path:
@@ -189,6 +206,17 @@ class DocxExportDialog(QDialog):
         # (pandoc работает во временном каталоге) – нормализуем поле
         path = os.path.abspath(path)
         self.path_edit.setText(path)
+        # Сессия 20 (требование заказчика): файл НЕ перезаписывается молча.
+        # Вопрос стоит ЗДЕСЬ, а не только в «Обзор…»: путь мог быть введен
+        # руками или остаться от прошлого экспорта того же проекта; и он
+        # обязан звучать ДО окна хода, иначе «Отмена» оставляла бы его
+        # висеть открытым
+        if os.path.exists(path):
+            launch_trace.trace_line("overwrite-ask", path=path)
+            if not self._confirm_overwrite(path):
+                launch_trace.trace_line("overwrite-answer=no")
+                return
+            launch_trace.trace_line("overwrite-answer=yes")
         # Сессия 19 (просьба заказчика): видно, на каком этапе сейчас
         # формирование – схемы, текст, конвертация, зачистка, проверка
         prog = self._make_progress()

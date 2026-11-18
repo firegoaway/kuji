@@ -205,6 +205,15 @@ _LETTER_ACTIONS: dict[str, list] = {}       # "Ctrl+E" -> [(owner, action)]
 _LAST_FIRED: dict[str, float] = {}          # seq -> monotonic-время
 _IN_FLIGHT: set[str] = set()                # seq внутри action.trigger()
 _FIRE_DEBOUNCE_S = 0.08
+# Сессия 20 (замер 6.10.4, launch_trace 14:51:32): после МОДАЛЬНОГО потока
+# (Ctrl+E → экспорт → вопрос → запуск) хвост того же нажатия – доехавший
+# автоповтор или событие из очереди, отложенной вложенными циклами, –
+# приходит УЖЕ после снятия пояса и снова открывает диалог. Поэтому
+# длительное действие получает «тихое окно» ПОСЛЕ возврата; короткие
+# действия (Undo, Ctrl+D) его не получают – троттлинг не нужен.
+_QUIET_UNTIL: dict[str, float] = {}         # seq -> monotonic до которого глушим
+_MODAL_FLOW_S = 0.3                         # дольше – считаем поток модальным
+_QUIET_AFTER_MODAL_S = 0.45
 
 
 def register_letter_action(seq: str, owner, action) -> None:
@@ -237,6 +246,8 @@ def _dispatch_letter(seq: str) -> bool:
     now = _time.monotonic()
     if seq in _IN_FLIGHT:
         return True                   # действие ещё не вернулось (модалка)
+    if now < _QUIET_UNTIL.get(seq, 0.0):
+        return True                   # хвост нажатия после модального потока
     if now - _LAST_FIRED.get(seq, 0.0) < _FIRE_DEBOUNCE_S:
         return True                   # уже запущено этим нажатием
     from PySide6.QtWidgets import QApplication
@@ -260,6 +271,11 @@ def _dispatch_letter(seq: str) -> bool:
             # штамп после возврата – возобновившаяся цепочка родителей
             # обязана попасть в дебаунс, а не запускать диалог второй раз
             _LAST_FIRED[seq] = _time.monotonic()
+            # действие крутило вложенные циклы дольше _MODAL_FLOW_S –
+            # глушим и хвост этого нажатия после снятия пояса (замер
+            # 6.10.4: dlg-open в ту же секунду, что и question-answer)
+            if _time.monotonic() - now > _MODAL_FLOW_S:
+                _QUIET_UNTIL[seq] = _time.monotonic() + _QUIET_AFTER_MODAL_S
         fired = True
     return fired
 

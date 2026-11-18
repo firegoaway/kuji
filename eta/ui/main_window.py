@@ -1761,16 +1761,23 @@ class MainWindow(QMainWindow):
         наследует его окружение – PATH с каталогами встроенного Python и
         PySide6, рабочую папку проекта, COM-контекст GUI-потока Qt.
 
-        Поэтому основной способ теперь – ОТСОЕДИНЁННЫЙ запуск: `cmd /c
-        start "" "<файл>"` с флагами DETACHED_PROCESS |
-        CREATE_NEW_PROCESS_GROUP и очищенным окружением. У такого Word нет
-        ни родительского процесса Python, ни COM-контекста GUI-потока Qt –
-        файл открывает свежий процесс cmd, который тут же завершается.
-        Дальше идут запасные способы, каждый – шов, поэтому тесты не
-        порождают реальных процессов. Все попытки пишутся в key_debug.log
-        строкой «open-report | …»."""
+        Сессия 20, задача 2. Трасса заказчика (launch_trace.log, 18.11.2026)
+        показала: во всех запусках реально исполнялся первичный способ
+        `cmd start` (way=cmd rc=spawned) – цепочка молча не деградировала,
+        но симптом остался: Word жалуется на Normal.dotm и открывает ПУСТОЕ
+        окно, сам отчёт не открывается. Единственный путь, который его
+        измерения стабильно дают чистым, – открытие из самого Проводника,
+        поэтому первичным способом стал `explorer.exe "<файл>"` ВООБЩЕ без
+        флагов создания (`_launch_via_explorer`): открытие выполняет сам
+        процесс оболочки – тот же механизм, что двойной клик. Прежние
+        способы остаются запасными (каждый – шов, тесты не порождают
+        реальных процессов). Все попытки пишутся в launch_trace.log
+        строкой «launch-attempt way=… rc=…» и в key_debug.log строкой
+        «open-report | …»."""
         target = os.path.abspath(str(path))
         if os.name == "nt":
+            if self._launch_via_explorer(target):
+                return True
             if self._launch_detached_start(target):
                 return True
             if self._launch_detached_powershell(target):
@@ -1786,9 +1793,41 @@ class MainWindow(QMainWindow):
         _lt.trace_line("launch-attempt", way="qt", rc=f"{ok}")
         return ok
 
+    def _launch_via_explorer(self, path: str) -> bool:
+        """Основной способ (сессия 20, задача 2): `explorer.exe "<файл>"`
+        вообще БЕЗ флагов создания – ни /select (тот открывает ПАПКУ, а не
+        отчёт), ни CREATE_NO_WINDOW (с ним оболочка молча глотала вызов –
+        замер 6.10.1), ни DETACHED-флагов: открытие выполняет сам процесс
+        Проводника, ровно тот путь, что двойной клик (замер заказчика
+        18.11.2026: из Проводника файл открывается чисто). Шов; в трассе –
+        way=explorer. ОСТОРОЖНО (внешняя рецензия): напрямую порождённый
+        explorer.exe не гарантированно ведет себя как работающая оболочка –
+        может открыть окно папки вместо файла; при проверке у заказчика
+        обязателен вопрос «ЧТО появилось на экране?»."""
+        import subprocess
+        explorer = os.path.join(
+            os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
+        try:
+            proc = subprocess.Popen(
+                [explorer, os.path.normpath(path)],
+                cwd=os.path.dirname(path) or None, env=_clean_child_env(),
+                close_fds=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as exc:
+            self._log_open_attempt(f"explorer <файл> отказал ({exc})")
+            _lt.trace_line("launch-attempt", way="explorer",
+                           rc=f"fail err={exc}")
+            return False
+        self._log_open_attempt(f"explorer <файл> → {path}")
+        _lt.trace_line("launch-attempt", way="explorer",
+                       rc=f"spawned pid={proc.pid}")
+        return True
+
     def _launch_detached_start(self, path: str) -> bool:
-        """Основной способ (сессия 19, раунд 5): `cmd /c start "" "<файл>"`
-        в ОТСОЕДИНЁННОМ процессе с очищенным окружением. Шов для тестов.
+        """Запасной способ №1 (сессия 19, раунд 5; с сессии 20 – НЕ
+        первичный: трасса заказчика показала way=cmd rc=spawned при
+        живом симптоме «пустой Word»): `cmd /c start "" "<файл>"` в
+        ОТСОЕДИНЁННОМ процессе с очищенным окружением. Шов для тестов.
 
         Смысл: Word запускает не наш процесс с инициализированным
         QApplication (COM single-threaded apartment) и не унаследованный
@@ -1861,11 +1900,11 @@ class MainWindow(QMainWindow):
                                     stderr=subprocess.DEVNULL)
         except OSError as exc:
             self._log_open_attempt(f"explorer /select отказал ({exc})")
-            _lt.trace_line("launch-attempt", way="explorer",
+            _lt.trace_line("launch-attempt", way="explorer-select",
                            rc=f"fail err={exc}")
             return False
         self._log_open_attempt(f"explorer /select → {path}")
-        _lt.trace_line("launch-attempt", way="explorer",
+        _lt.trace_line("launch-attempt", way="explorer-select",
                        rc=f"spawned pid={proc.pid}")
         return True
 

@@ -536,7 +536,11 @@ UID-вариант. Папка – СВОЙ ключ `export/last_dir` (см. «
 
 **После экспорта (сессия 19, LOCKED).** `DocxExportDialog._do_export`
 нормализует путь `os.path.abspath` (pandoc требует абсолютный), пишет его
-в `exported_path` и закрывает диалог. Дальше работает
+в `exported_path` и закрывает диалог. С сессии 20 (требование
+заказчика) существующий файл сначала проходит вопрос о перезаписе –
+шов `_confirm_overwrite`, «Перезаписать» по умолчанию; «Отмена»
+останавливает экспорт ещё ДО окна хода (иначе окно оставалось бы
+висеть открытым). Дальше работает
 `MainWindow._after_docx_export` – отдельный метод именно для того, чтобы
 вся цепочка проверялась в offscreen без модалки: обновляет
 `export/last_dir`, показывает «DOCX: <путь>» (в обеих ветках ответа) и
@@ -576,7 +580,14 @@ UID-вариант. Папка – СВОЙ ключ `export/last_dir` (см. «
   ЛАМБДОЙ: сигнал несёт bool `checked`, который иначе попал бы в
   `source`;
 * `_pump()`/окно хода НЕ трогать (просьба заказчика): доставка событий
-  не опасна, пока пояс и погашенное действие держат вход.
+  не опасна, пока пояс и погашенное действие держат вход;
+* «ТИХОЕ ОКНО» после модального потока (6.11.0): замер 6.10.4
+  (launch_trace 14:51:32) – хвост того же Ctrl+E (доехавший автоповтор
+  или событие из очереди вложенных циклов) приходил УЖЕ после снятия
+  пояса и открывал диалог снова. `latin_keys._dispatch_letter` после
+  возврата действия, длившегося дольше `_MODAL_FLOW_S` (0.3 с), глушит
+  тот же seq ещё `_QUIET_AFTER_MODAL_S` (0.45 с); короткие действия
+  (Undo, Ctrl+D) окна не получают – троттлинга нет.
 
 **Всегда включённая трасса `qa_artifacts\launch_trace.log` (сессия 20,
 разрешение заказчика 18.11.2026).** Модуль `eta\ui\launch_trace.py`
@@ -586,11 +597,16 @@ UID-вариант. Папка – СВОЙ ключ `export/last_dir` (см. «
 События и авторы: `dlg-open source=… project=<база|UID> t=<monotonic>`
 и `dlg-open-blocked reason=belt source=…` – `MainWindow._export_docx`;
 `dlg-export-start path=…` / `dlg-export-done ms=…` / `dlg-export-fail
-err=…` – `DocxExportDialog._do_export`; `dlg-accepted`/`dlg-rejected` –
-`_export_docx`; `question-shown` / `question-answer=yes|no` –
-`_ask_open_report`; `launch-attempt way=<cmd|powershell|explorer|
-startfile|qt|winword> rc=<spawned pid=…|ok|fail err=…>` – каждый шов
-цепочки открытия. Зачем: launch-цепочка молча деградирует до
+err=…` – `DocxExportDialog._do_export`; `overwrite-ask path=…` /
+`overwrite-answer=yes|no` – вопрос о перезаписи существующего файла
+(требование заказчика 18.11.2026: файл не перезаписывается молча; шов
+`DocxExportDialog._confirm_overwrite`, «Перезаписать» по умолчанию);
+`dlg-accepted`/`dlg-rejected` – `_export_docx`; `question-shown` /
+`question-answer=yes|no` – `_ask_open_report`; `launch-attempt
+way=<cmd|powershell|explorer|explorer-select|startfile|qt|winword>
+rc=<spawned pid=…|ok|fail err=…>` – каждый шов цепочки открытия
+(explorer – открытие САМОГО файла Проводником, explorer-select –
+запасной показ папки с выделением). Зачем: launch-цепочка молча деградирует до
 `os.startfile` (неудача возвращает False без исключения), и без трассы
 невозможно узнать, какой способ ИСПОЛНИЛСЯ на машине заказчика; трасса
 НЕ заменяет `key_debug.log` (последний – про клавиши,
@@ -611,7 +627,13 @@ KUJI_DEBUG_KEYS=1). Правило на будущее: любое измене�
 своей среды. Требование заказчика (раунд 5): открывать САМ отчёт, а не папку с
 ним. Поэтому `MainWindow._open_path` идёт по цепочке ШВОВ (тесты подменяют
 методы и никогда не порождают реальные процессы):
-(1) `_launch_detached_start` – `cmd.exe /c start "" "<файл>"` в ОТСОЕДИНЁННОМ
+(1) `_launch_via_explorer` – ПЕРВИЧНЫЙ с сессии 20 (трасса заказчика
+доказала: прежний первичный cmd start ИСПОЛНЯЛСЯ, но симптом «пустой
+Word + Normal.dotm» оставался): `explorer.exe "<файл>"` ВООБЩЕ без
+флагов создания и без `/select` – открытие выполняет сам процесс
+Проводника, тот же механизм, что двойной клик (единственный чистый
+путь по замерам заказчика); `way=explorer` в трассе;
+(2) `_launch_detached_start` – `cmd.exe /c start "" "<файл>"` в ОТСОЕДИНЁННОМ
 процессе: `creationflags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`
 (0x8 | 0x200), `cwd` = папка файла, `env = _clean_child_env()`,
 `close_fds=True`, stdio в DEVNULL. Смысл: Word запускает не python.exe с
@@ -620,12 +642,13 @@ KUJI_DEBUG_KEYS=1). Правило на будущее: любое измене�
 ShellExecute и сразу завершается. ВАЖНО: `DETACHED_PROCESS` и
 `CREATE_NO_WINDOW` вместе передавать НЕЛЬЗЯ – это два способа задать «консоли
 нет», вместе они дают ошибку создания процесса;
-(2) `_launch_detached_powershell` – `powershell -NoProfile -NonInteractive
+(3) `_launch_detached_powershell` – `powershell -NoProfile -NonInteractive
 -WindowStyle Hidden -Command Start-Process -FilePath "<файл>"`, те же флаги;
-(3) `_reveal_in_explorer` – `'"<explorer>" /select,"<файл>"'` БЕЗ
+(4) `_reveal_in_explorer` – `'"<explorer>" /select,"<файл>"'` БЕЗ
 `CREATE_NO_WINDOW` (с ним оболочка молча проглатывала вызов – замер на 6.10.1);
-(4) `_launch_via_startfile` – `os.startfile(path, "open")`;
-(5) `QDesktopServices.openUrl` – прочие платформы и отказ всех четырёх.
+в трассе `way=explorer-select`, чтобы не путать с (1);
+(5) `_launch_via_startfile` – `os.startfile(path, "open")`;
+(6) `QDesktopServices.openUrl` – прочие платформы и отказ всех пяти.
 `_clean_child_env()` выбрасывает из PATH сегменты, содержащие `runtime`,
 `pyside`, `shiboken`, `qt`, и НЕ трогает `APPDATA`/`LOCALAPPDATA`/`USERPROFILE` –
 по ним Word ищет свой `%APPDATA%\Microsoft\Templates\Normal.dotm` (проверено:
@@ -644,17 +667,19 @@ ShellExecute и сразу завершается. ВАЖНО: `DETACHED_PROCESS
 перепробованы (раунды 1–5). РЕШАЮЩИЙ опыт: при полностью закрытом
 WINWORD.EXE тот же отчёт из Проводника открывается ЧИСТО → гипотеза
 «повреждён Normal.dotm заказчика» (H-B) ИСКЛЮЧЕНА, остаётся наш контекст
-запуска (H-A). Дальше ТОЛЬКО по трассе: до чтения `launch_trace.log` с
-машины заказчика (какой `way=` реально исполнился) никаких переписываний
-цепочки – три непроверенные гипотезы уже публиковались как «исправления»
-(главный урок сессии 19). Кандидат на ОДНУ измеренную правку после
-трассы: `explorer.exe <файл>` вовсе без флагов создания (не /select и не
-CREATE_NO_WINDOW – оба уже опробованы); резерв – прямой запуск
+запуска (H-A). Сессия 20, трасса заказчика (launch_trace.log 14:51–14:53):
+во ВСЕХ запусках реально исполнялся первичный `cmd start`
+(`way=cmd rc=spawned` с pid) – цепочка молча не деградировала, но симптом
+«Word жалуется на Normal.dotm и открывает ПУСТОЕ окно, отчёт не открыт»
+остался. Поэтому ОДНОЙ измеренной правкой первичным способом стал
+`_launch_via_explorer` (см. выше цепочку): открытие выполняет сам процесс
+Проводника – тот же механизм, что двойной клик. Правила на проверку:
+никаких новых гипотез «исправлением» – трасса до, одна правка, замер
+заказчика после (с обязательным вопросом «ЧТО появилось: отчёт, окно
+папки или ничего?» – напрямую порождённый explorer.exe не гарантированно
+ведёт себя как работающая оболочка); резерв без DDE – прямой запуск
 `WINWORD.EXE /n <файл>` (путь из `App Paths`, `DETACHED_PROCESS |
 CREATE_NEW_PROCESS_GROUP`, без CREATE_NO_WINDOW; это НЕ COM-автоматация).
-Предостережение на проверку: напрямую порождённый `explorer.exe` может
-открыть окно папки вместо файла – вопрос заказчику «что появилось?»
-обязателен.
 
 **Ход формирования отчёта (сессия 19, раунд 2).** `export_docx(...,
 progress=None)` принимает извещатель `progress(value: float, message: str)`

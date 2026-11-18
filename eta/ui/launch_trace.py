@@ -24,12 +24,16 @@ qa_artifacts\\launch_trace.log. События:
     поясом `_export_running` (второй диалог НЕ открыт);
   * `dlg-export-start path=<файл>` / `dlg-export-done ms=<мс>` /
     `dlg-export-fail err=<…>` – сборка отчёта внутри диалога;
+  * `overwrite-ask path=<файл>` / `overwrite-answer=<yes|no>` – вопрос
+    о перезаписи существующего файла (сессия 20, требование заказчика);
   * `dlg-accepted` / `dlg-rejected` – чем закончился диалог;
   * `question-shown` / `question-answer=<yes|no>` – вопрос об открытии;
-  * `launch-attempt way=<cmd|powershell|explorer|startfile|qt|winword>
-    rc=<ok|spawned pid=…|fail err=…>` – КАЖДАЯ попытка открыть отчёт:
-    по этим строкам видно, какой способ реально исполнился на машине
-    заказчика (фолбэк-цепочка больше не «молчит»).
+  * `launch-attempt way=<cmd|powershell|explorer|explorer-select|
+    startfile|qt|winword> rc=<ok|spawned pid=…|fail err=…>` – КАЖДАЯ
+    попытка открыть отчёт: по этим строкам видно, какой способ реально
+    исполнился на машине заказчика (фолбэк-цепочка больше не «молчит»;
+    explorer – открытие САМОГО файла процессом Проводника, сессия 20;
+    explorer-select – запасной показ папки с выделением).
 
 Файл держит последние `_MAX_LINES` строк (не растёт вечно). Запись
 никогда не роняет приложение: любая ошибка диска проглатывается.
