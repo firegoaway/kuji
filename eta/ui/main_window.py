@@ -135,7 +135,7 @@ def migrate_qsettings() -> None:
         return
     old = QSettings(QSettings.Format.NativeFormat,
                     QSettings.Scope.UserScope, "GraphiczD", "Freq ETA 533")
-    # ВАЖНО (сессия 20): старый магазин читается ЯВНО из реестра, иначе
+    # ВАЖНО (сессия 19): старый магазин читается ЯВНО из реестра, иначе
     # после перевода приложения на INI этот вызов искал бы
     # %APPDATA%\GraphiczD\Freq ETA 533.ini и не нашёл бы ничего.
     for key in old.allKeys():
@@ -1413,7 +1413,7 @@ class MainWindow(QMainWindow):
         """Задача 12: запомнить папку успешного сохранения/открытия
         ПРОЕКТА (ключ ui/last_dir). Экспорт – только export/last_dir
         (Задача 1, сессия 19), иначе отчет уводил бы «Открыть проект»
-        в папку отчетов. Запись сразу уходит на диск (sync) – сессия 20."""
+        в папку отчетов. Запись сразу уходит на диск (sync) – сессия 19."""
         d = os.path.dirname(str(path))
         if d:
             _as.write_value("ui/last_dir", d)
@@ -1433,7 +1433,7 @@ class MainWindow(QMainWindow):
         УСПЕШНОГО экспорта и после выбора пути в «Обзор…» (в т. ч. если
         диалог затем отменен). Ключ ui/last_dir не трогает.
 
-        Сессия 20 (п.3): запись идёт через `app_settings.write_value`, то
+        Сессия 19 (п.3): запись идёт через `app_settings.write_value`, то
         есть с немедленным `sync()` в ЯВНЫЙ INI-файл. Прежняя схема
         (реестр + кэш Qt до разрушения последнего QSettings) на машине
         заказчика теряла значения: перезапуск не помнил ни папку экспорта,
@@ -1669,36 +1669,76 @@ class MainWindow(QMainWindow):
         return box.clickedButton() is yes
 
     def _open_path(self, path: str) -> bool:
-        """Задача 3 (сессия 19): открыть файл системным приложением по
-        умолчанию. Шов для тестов; False – ассоциации нет (тогда окно
-        сообщает путь, чтобы пользователь открыл файл сам).
+        """Задача 3 (сессия 19): открыть отчёт системным приложением по
+        умолчанию. Шов для тестов; False – файл открыть не удалось (тогда
+        окно сообщает путь, чтобы пользователь открыл его сам).
 
-        Сессия 20 (замечание заказчика): предупреждение Word про
-        Normal.dotm появляется ТОЛЬКО при открытии из программы, а при
-        двойном щелчке в Проводнике файл открывается чисто. Разница –
-        способ запуска: `QDesktopServices.openUrl(QUrl.fromLocalFile(…))`
-        передаёт ShellExecute URL-форму пути (проценты, косые черты,
-        кириллица), тогда как Проводчик вызывает ShellExecute с обычным
-        путём Win32. Поэтому на Windows файл открывается через
-        `os.startfile` – это ровно тот же вызов, что и у Проводника, – а
-        QDesktopServices остаётся запасным путём для других платформ.
-        Способ открытия пишется в key_debug.log, чтобы при повторе жалобы
-        было что читать."""
+        Сессия 19, раунд замечаний: Word показывал «в документе
+        Normal.dotm обнаружено содержимое, которое не удалось прочитать»
+        ТОЛЬКО при открытии из программы, а тот же файл из Проводника
+        открывался штатно. Сам пакет отчёта чист (следов чужого шаблона в
+        нём нет – это проверяют export_docx, QA и тесты), значит дело в
+        способе запуска. QDesktopServices.openUrl отдаёт ShellExecute
+        URL-форму пути, os.startfile – обычный путь, но в обоих случаях
+        WINWORD.EXE порождается НАШИМ процессом и наследует его окружение:
+        PATH с каталогами встроенного Python и PySide6, рабочую папку
+        проекта и COM-контекст GUI-потока Qt. Проводник же запускает Word
+        из своей чистой среды Windows.
+
+        Поэтому порядок такой: (1) explorer.exe как брокер – ровно тот же
+        путь, что и при двойном щелчке; (2) os.startfile; (3) запасной
+        QDesktopServices. Выбранный способ пишется в key_debug.log строкой
+        «open-report | …», чтобы любая повторная жалоба шла с данными."""
+        target = os.path.abspath(str(path))
+        if os.name == "nt":
+            if self._launch_via_explorer(target):
+                return True
+            if self._launch_via_startfile(target):
+                return True
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
-        import os as _os
-        target = str(path)
-        if _os.name == "nt":
-            try:
-                _os.startfile(target, "open")
-                self._log_open_attempt(f"os.startfile → {target}")
-                return True
-            except Exception as exc:  # noqa: BLE001 – уходим на Qt-путь
-                self._log_open_attempt(f"os.startfile отказал ({exc});"
-                                       f" QDesktopServices → {target}")
         ok = bool(QDesktopServices.openUrl(QUrl.fromLocalFile(target)))
         self._log_open_attempt(f"QDesktopServices → {target} ok={ok}")
         return ok
+
+    def _launch_via_explorer(self, path: str) -> bool:
+        """Открыть файл через explorer.exe (брокер Проводника). Шов: тесты
+        подменяют метод, чтобы никогда не порождать настоящие процессы.
+
+        Окружение передаётся очищенным от каталогов встроенного Python и
+        PySide6, чтобы Word не подхватывал наши библиотеки вместо своих."""
+        import subprocess
+        explorer = os.path.join(
+            os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
+        env = os.environ.copy()
+        noise = ("runtime", "pyside", "shiboken", "qt")
+        env["PATH"] = os.pathsep.join(
+            p for p in env.get("PATH", "").split(os.pathsep)
+            if p and not any(n in p.lower() for n in noise))
+        try:
+            subprocess.Popen([explorer, os.path.normpath(path)],
+                             cwd=os.path.dirname(path) or None, env=env,
+                             close_fds=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             creationflags=0x08000000)   # CREATE_NO_WINDOW
+        except OSError as exc:
+            self._log_open_attempt(f"explorer.exe отказал ({exc});"
+                                   f" пробую os.startfile → {path}")
+            return False
+        self._log_open_attempt(f"explorer.exe → {path}")
+        return True
+
+    def _launch_via_startfile(self, path: str) -> bool:
+        """Обычный ShellExecute из нашего процесса (второй пояс). Шов."""
+        try:
+            os.startfile(path, "open")
+        except (OSError, AttributeError) as exc:
+            self._log_open_attempt(f"os.startfile отказал ({exc});"
+                                   f" пробую QDesktopServices → {path}")
+            return False
+        self._log_open_attempt(f"os.startfile → {path}")
+        return True
 
     @staticmethod
     def _log_open_attempt(text: str) -> None:
@@ -1716,7 +1756,7 @@ class MainWindow(QMainWindow):
         вызывается из closeEvent И по дебаунсу splitterMoved, чтобы
         размеры панелей переживала любой путь выхода.
 
-        Сессия 20 (п.3): хранилище – явный INI (`app_settings`), и
+        Сессия 19 (п.3): хранилище – явный INI (`app_settings`), и
         сохранение завершается `sync()`. Без sync Qt вправе держать
         значения в кэше до разрушения последнего объекта QSettings, а
         завершённый «сверху» процесс их терял – именно так на машине

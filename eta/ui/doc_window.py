@@ -94,7 +94,7 @@ class DocumentWindow(QWidget):
         # Задача 1 (сессия 18): размер/положение запоминаются при скрытии
         # ЛЮБЫМ путём (close, скрытие родителем, teardown приложения) –
         # closeEvent главного окна и сигнал closed покрывают не всё
-        # Сессия 20 (п.3): запись через app_settings – явный INI + sync()
+        # Сессия 19 (п.3): запись через app_settings – явный INI + sync()
         from . import app_settings as _as
         _as.write_value("ui/doc_geometry", self.saveGeometry())
         super().hideEvent(e)

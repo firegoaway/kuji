@@ -26,7 +26,7 @@ def main() -> int:
     app.setOrganizationDomain("graphiczd.local")
     app.setApplicationName("Kuji ETA 533")
     app.setApplicationDisplayName("Kuji (Куджи)")
-    # Сессия 20 (п.3): настройки приложения лежат в ЯВНОМ INI-файле
+    # Сессия 19 (п.3): настройки приложения лежат в ЯВНОМ INI-файле
     # (%APPDATA%\GraphiczD\Kuji ETA 533.ini), а не в реестре: на машине
     # заказчика записи в ветку реестра терялись, и перезапуск не помнил ни
     # размеров окон, ни последней папки экспорта. Делается до первого окна

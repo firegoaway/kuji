@@ -2184,7 +2184,7 @@ class KBWindow(QDialog):
         # Задача 1 (сессия 18): размер/положение запоминаются при скрытии
         # ЛЮБЫМ путём – не только closeEvent (например, скрытие дочерним
         # окном при закрытии главного окна без close диалога)
-        # Сессия 20 (п.3): запись через app_settings – явный INI + sync()
+        # Сессия 19 (п.3): запись через app_settings – явный INI + sync()
         from . import app_settings as _as
         _as.write_value("ui/kb_geometry", self.saveGeometry())
         super().hideEvent(e)
@@ -2199,7 +2199,7 @@ class KBWindow(QDialog):
                 self._save_all()
         # Задача 11 (сессия 13): запомнить размер/положение окна БД –
         # восстановление при следующем создании (ui/kb_geometry)
-        # Сессия 20 (п.3): запись через app_settings – явный INI + sync()
+        # Сессия 19 (п.3): запись через app_settings – явный INI + sync()
         from . import app_settings as _as
         _as.write_value("ui/kb_geometry", self.saveGeometry())
         e.accept()
