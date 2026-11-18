@@ -57,6 +57,18 @@ UNDO_DEPTH = 50
 _ENV_NOISE = ("runtime", "pyside", "shiboken", "qt")
 
 
+# Флаги CreateProcess для ОТСОЕДИНЁННОГО запуска внешнего приложения
+# (сессия 19, раунд 5): DETACHED_PROCESS – без консоли и без окна,
+# CREATE_NEW_PROCESS_GROUP – своя группа, чтобы Ctrl+C/Ctrl+Break нашего
+# процесса не долетали до Word. ВНИМАНИЕ: DETACHED_PROCESS и
+# CREATE_NO_WINDOW одновременно передавать нельзя – это два способа
+# задать «консоли нет», вместе они дают ошибку создания процесса.
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_DETACHED_FLAGS = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
+_CREATE_NO_WINDOW = 0x08000000
+
+
 def _clean_child_env() -> dict:
     """Копия окружения без наших каталогов в PATH – для запуска внешних
     программ (Проводник, cmd). Остальные переменные, включая APPDATA и
@@ -1681,17 +1693,17 @@ class MainWindow(QMainWindow):
                     f" Файл сохранен: {out}")
 
     def _ask_open_report(self, path: str) -> bool:
-        """Задача 3 (сессия 19): вопрос после успешного экспорта. Шов:
+        """Задача 3 (сессия 19, LOCKED): «Отчет сформирован. Желаете
+        открыть его сейчас?» – Да/Нет, «Да» по умолчанию и в фокусе. Шов:
         offscreen-тесты подменяют метод, модалка в прогоне не крутится.
 
-        Формулировка (раунд замечаний, выбор заказчика): «Открыть папку с
-        отчетом?» – потому что «Да» теперь показывает файл в окне Проводника
-        выделенным, а не запускает Word из нашего процесса (именно такой
-        запуск вызывал у Word предупреждение про Normal.dotm)."""
+        Раунд 5: формулировка возвращена к исходной – «Да» снова открывает
+        САМ отчёт (Word), а не папку с ним; способ запуска при этом
+        отсоединённый, см. `_open_path`."""
         box = QMessageBox(self)
         box.setWindowTitle("Экспорт завершен")
         box.setIcon(QMessageBox.Icon.Question)
-        box.setText("Отчет сформирован. Открыть папку с отчетом?")
+        box.setText("Отчет сформирован. Желаете открыть его сейчас?")
         yes = box.addButton("Да", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Нет", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(yes)
@@ -1713,17 +1725,21 @@ class MainWindow(QMainWindow):
         наследует его окружение – PATH с каталогами встроенного Python и
         PySide6, рабочую папку проекта, COM-контекст GUI-потока Qt.
 
-        Поэтому основной способ теперь – Проводник с выделенным файлом
-        (`explorer /select`), его и выбрал заказчик: Word при этом запускает
-        сам Проводник из чистой среды Windows, предупреждение не возникает,
-        а готовый отчёт сразу виден. Дальше идут запасные способы, каждый –
-        шов, поэтому тесты не порождают реальных процессов. Все попытки
-        пишутся в key_debug.log строкой «open-report | …»."""
+        Поэтому основной способ теперь – ОТСОЕДИНЁННЫЙ запуск: `cmd /c
+        start "" "<файл>"` с флагами DETACHED_PROCESS |
+        CREATE_NEW_PROCESS_GROUP и очищенным окружением. У такого Word нет
+        ни родительского процесса Python, ни COM-контекста GUI-потока Qt –
+        файл открывает свежий процесс cmd, который тут же завершается.
+        Дальше идут запасные способы, каждый – шов, поэтому тесты не
+        порождают реальных процессов. Все попытки пишутся в key_debug.log
+        строкой «open-report | …»."""
         target = os.path.abspath(str(path))
         if os.name == "nt":
-            if self._reveal_in_explorer(target):
+            if self._launch_detached_start(target):
                 return True
-            if self._launch_via_cmd_start(target):
+            if self._launch_detached_powershell(target):
+                return True
+            if self._reveal_in_explorer(target):
                 return True
             if self._launch_via_startfile(target):
                 return True
@@ -1732,6 +1748,54 @@ class MainWindow(QMainWindow):
         ok = bool(QDesktopServices.openUrl(QUrl.fromLocalFile(target)))
         self._log_open_attempt(f"QDesktopServices → {target} ok={ok}")
         return ok
+
+    def _launch_detached_start(self, path: str) -> bool:
+        """Основной способ (сессия 19, раунд 5): `cmd /c start "" "<файл>"`
+        в ОТСОЕДИНЁННОМ процессе с очищенным окружением. Шов для тестов.
+
+        Смысл: Word запускает не наш процесс с инициализированным
+        QApplication (COM single-threaded apartment) и не унаследованный
+        PATH встроенного Python, а свежий cmd, который отрабатывает
+        ShellExecute и сразу завершается. Консоли у него нет
+        (DETACHED_PROCESS), поэтому окно не мелькает."""
+        import subprocess
+        # полный путь: PATH ребёнка мы сами же и почистили, полагаться на
+        # его разрешение для поиска cmd.exe не стоит
+        cmd = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                           "System32", "cmd.exe")
+        try:
+            subprocess.Popen(
+                [cmd, "/c", "start", "", os.path.normpath(path)],
+                cwd=os.path.dirname(path) or None, env=_clean_child_env(),
+                close_fds=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=_DETACHED_FLAGS)
+        except OSError as exc:
+            self._log_open_attempt(f"cmd start (detached) отказал ({exc})")
+            return False
+        self._log_open_attempt(f"cmd start detached → {path}")
+        return True
+
+    def _launch_detached_powershell(self, path: str) -> bool:
+        """Запасной отсоединённый способ: PowerShell `Start-Process`. Шов."""
+        import subprocess
+        ps = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                          "System32", "WindowsPowerShell", "v1.0",
+                          "powershell.exe")
+        safe = str(path).replace('"', "")
+        try:
+            subprocess.Popen(
+                [ps, "-NoProfile", "-NonInteractive", "-WindowStyle",
+                 "Hidden", "-Command", f'Start-Process -FilePath "{safe}"'],
+                cwd=os.path.dirname(path) or None, env=_clean_child_env(),
+                close_fds=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=_DETACHED_FLAGS)
+        except OSError as exc:
+            self._log_open_attempt(f"powershell Start-Process отказал ({exc})")
+            return False
+        self._log_open_attempt(f"powershell Start-Process → {path}")
+        return True
 
     def _reveal_in_explorer(self, path: str) -> bool:
         """Показать файл в окне Проводника выделенным (`explorer /select`).
@@ -1754,24 +1818,6 @@ class MainWindow(QMainWindow):
             self._log_open_attempt(f"explorer /select отказал ({exc})")
             return False
         self._log_open_attempt(f"explorer /select → {path}")
-        return True
-
-    def _launch_via_cmd_start(self, path: str) -> bool:
-        """Запасной способ: `cmd /c start "" "<файл>"` в очищенном
-        окружении – открывает файл ассоциированным приложением, но Word
-        запускает не наш процесс напрямую. Шов."""
-        import subprocess
-        try:
-            subprocess.Popen(
-                ["cmd.exe", "/c", "start", "", os.path.normpath(path)],
-                cwd=os.path.dirname(path) or None, env=_clean_child_env(),
-                close_fds=True, stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                creationflags=0x08000000)          # CREATE_NO_WINDOW
-        except OSError as exc:
-            self._log_open_attempt(f"cmd start отказал ({exc})")
-            return False
-        self._log_open_attempt(f"cmd start → {path}")
         return True
 
     def _launch_via_startfile(self, path: str) -> bool:
