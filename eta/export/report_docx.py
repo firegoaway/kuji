@@ -489,10 +489,23 @@ def render_owner_png(canvas, owner_trees, kb, ctx_map, titles: dict,
 
 def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
                 owner_titles: dict, fmt_id: str = "A4L",
-                canvas=None) -> str:
+                canvas=None, progress=None) -> str:
     """Полный конвейер: PNG схем + Markdown + pandoc → один docx.
-    Возвращает путь; ошибки – исключениями с русскими текстами."""
+    Возвращает путь; ошибки – исключениями с русскими текстами.
+
+    `progress(value, message)` (сессия 20, просьба заказчика) – необязательный
+    извещатель хода: доля 0..1 и русская подпись текущего этапа. Вызывается из
+    GUI-потока, поэтому приёмник сам крутит события окна; исключение приёмника
+    глушится – индикатор не имеет права ломать экспорт."""
     import zipfile
+
+    def _say(value: float, message: str) -> None:
+        if progress is None:
+            return
+        try:
+            progress(float(value), str(message))
+        except Exception:  # noqa: BLE001 – индикатор не важнее результата
+            pass
 
     if not PANDOC_EXE.exists():
         raise FileNotFoundError(
@@ -504,21 +517,34 @@ def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
     # pandoc запускается с cwd=временной папке – ПУТЬ К ВЫВОДУ обязан
     # быть абсолютным (относительный resolution'ился бы в temp)
     path = str(Path(path).resolve())
+    _say(0.02, "Подготовка документа")
     with tempfile.TemporaryDirectory(prefix="kuji_docx_") as tmp:
         tmp_dir = Path(tmp)
         images: list[tuple[str, str]] = []
+        sections = owner_sections(objects, trees)
         if canvas is not None:
-            for owner, _chain, owner_trees in owner_sections(objects,
-                                                             trees):
+            total = max(1, len(sections))
+            for num, (owner, _chain, owner_trees) in enumerate(sections,
+                                                              start=1):
+                _say(0.05 + 0.45 * (num - 1) / total,
+                     f"Рисование схемы: {owner.title}")
                 png = tmp_dir / f"schema_{owner.id}.png"
                 if render_owner_png(canvas, owner_trees, kb, ctx_map,
                                     {owner.id: owner.title}, fmt_id,
                                     str(png)):
                     images.append((owner.id, str(png)))
+        _say(0.55, "Сборка текста отчета")
         md = build_markdown(objects, trees, kb, ctx_map, owner_titles,
                             fmt_id, images)
         md_path = tmp_dir / "report.md"
         md_path.write_text(md, encoding="utf-8")
+        # pandoc – единственный долгий шаг без промежуточных процентов.
+        # СЕССИЯ 20, проверено живьём: ждать через Popen+poll нельзя –
+        # никто не читает stdout/stderr, и при полном буфере трубы pandoc
+        # блокируется навсегда (прогон тестов висел минуты вместо секунд).
+        # Поэтому – блокирующий вызов с таймаутом, как и было; индикатор
+        # просто стоит на этапе «Конвертация в DOCX», пока pandoc работает.
+        _say(0.6, "Конвертация в DOCX")
         r = subprocess.run(
             [str(PANDOC_EXE), "-f", "markdown", "-t", "docx",
              "--reference-doc", str(REFERENCE_DOCX),
@@ -527,7 +553,7 @@ def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
             capture_output=True, text=True, timeout=300,
             cwd=str(tmp_dir))
         if r.returncode != 0:
-            raise RuntimeError("Ошибка pandoc: " + r.stderr[:500])
+            raise RuntimeError("Ошибка pandoc: " + (r.stderr or "")[:500])
     # Сессия 20 (п.2): зачистка пакета. Из ГОСТ-шаблона в файл приезжают
     # docProps/app.xml с <Template>Normal.dotm</Template> (Word на таком
     # документе запускает восстановление Normal.dotm – с макросами и
@@ -535,9 +561,11 @@ def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
     # бесхозные медиа донора. Всё это убирается до того, как файл увидит
     # пользователь; ошибка зачистки – обычная русская ошибка экспорта.
     from .docx_tidy import tidy_package
+    _say(0.88, "Проверка и зачистка файла")
     tidy_package(path)
     # валидация результата: zip целый, титул и поле оглавления на месте,
     # формулы – настоящие OMML, чужих шаблонов в файле не осталось
+    _say(0.95, "Проверка состава отчета")
     with zipfile.ZipFile(path) as z:
         if z.testzip() is not None:
             raise RuntimeError("Поврежденный docx-файл")
@@ -554,4 +582,5 @@ def export_docx(path: str, objects, trees: list, kb, ctx_map: dict,
             if b"Normal.dotm" in blob or b"attachedTemplate" in blob:
                 raise RuntimeError(
                     f"В отчете остался след чужого шаблона Word: {name}")
+    _say(1.0, "Готово")
     return path

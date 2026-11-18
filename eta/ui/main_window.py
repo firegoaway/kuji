@@ -1671,10 +1671,43 @@ class MainWindow(QMainWindow):
     def _open_path(self, path: str) -> bool:
         """Задача 3 (сессия 19): открыть файл системным приложением по
         умолчанию. Шов для тестов; False – ассоциации нет (тогда окно
-        сообщает путь, чтобы пользователь открыл файл сам)."""
+        сообщает путь, чтобы пользователь открыл файл сам).
+
+        Сессия 20 (замечание заказчика): предупреждение Word про
+        Normal.dotm появляется ТОЛЬКО при открытии из программы, а при
+        двойном щелчке в Проводнике файл открывается чисто. Разница –
+        способ запуска: `QDesktopServices.openUrl(QUrl.fromLocalFile(…))`
+        передаёт ShellExecute URL-форму пути (проценты, косые черты,
+        кириллица), тогда как Проводчик вызывает ShellExecute с обычным
+        путём Win32. Поэтому на Windows файл открывается через
+        `os.startfile` – это ровно тот же вызов, что и у Проводника, – а
+        QDesktopServices остаётся запасным путём для других платформ.
+        Способ открытия пишется в key_debug.log, чтобы при повторе жалобы
+        было что читать."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
-        return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))))
+        import os as _os
+        target = str(path)
+        if _os.name == "nt":
+            try:
+                _os.startfile(target, "open")
+                self._log_open_attempt(f"os.startfile → {target}")
+                return True
+            except Exception as exc:  # noqa: BLE001 – уходим на Qt-путь
+                self._log_open_attempt(f"os.startfile отказал ({exc});"
+                                       f" QDesktopServices → {target}")
+        ok = bool(QDesktopServices.openUrl(QUrl.fromLocalFile(target)))
+        self._log_open_attempt(f"QDesktopServices → {target} ok={ok}")
+        return ok
+
+    @staticmethod
+    def _log_open_attempt(text: str) -> None:
+        """Строка о том, ЧЕМ именно открыли отчёт (KUJI_DEBUG_KEYS=1)."""
+        try:
+            from .latin_keys import debug_line
+            debug_line(f"open-report | {text}")
+        except Exception:  # noqa: BLE001 – диагностика не важнее экспорта
+            pass
 
     # ============================ настройки ============================
     def _persist_ui_state(self) -> None:

@@ -18,11 +18,66 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
-from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFormLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QVBoxLayout)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog,
+                               QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QProgressBar, QPushButton, QVBoxLayout)
 
 from ..export.report_docx import FORMAT_LABELS, export_docx
+
+
+def _pump(times: int = 3) -> None:
+    """Дать окну перерисоваться (экспорт идёт в GUI-потоке)."""
+    app = QApplication.instance()
+    for _ in range(max(1, int(times))):
+        if app is None:
+            return
+        app.processEvents()
+
+
+class ReportProgress(QDialog):
+    """Ход формирования отчёта (сессия 20, просьба заказчика): полоса
+    прогресса и текущий этап.
+
+    Показывается НЕ модально (`show()`, не `exec()`): сам экспорт выполняется
+    в этом же потоке и между этапами крутит события через `_pump()`, а
+    модальный `exec()` внутри обработчика «Экспортировать» повесил бы и
+    экспорт, и окно (тот же урок, что и с модалками в offscreen-прогонах)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Формирование отчета DOCX")
+        self.setModal(False)
+        self.setMinimumWidth(440)
+        box = QVBoxLayout(self)
+        box.setContentsMargins(16, 16, 16, 16)
+        box.setSpacing(10)
+        self.info = QLabel("Подготовка документа")
+        self.info.setWordWrap(True)
+        self.bar = QProgressBar()
+        self.bar.setRange(0, 100)
+        self.bar.setValue(0)
+        self.bar.setFormat("%p%")
+        box.addWidget(self.info)
+        box.addWidget(self.bar)
+
+    def show_progress(self) -> None:
+        self.show()
+        _pump()
+
+    def stage(self, value: float, message: str = "") -> None:
+        """Один этап конвейера: доля 0..1 и русская подпись."""
+        try:
+            done = max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return
+        self.bar.setValue(int(round(done * 100)))
+        if message:
+            self.info.setText(str(message))
+        _pump()
+
+    def close_progress(self) -> None:
+        self.close()
+        _pump(1)
 
 
 class DocxExportDialog(QDialog):
@@ -115,6 +170,14 @@ class DocxExportDialog(QDialog):
             if self._remember_dir is not None:
                 self._remember_dir(path)
 
+    def _make_progress(self):
+        """ШОВ: окно хода формирования отчета. Тесты подменяют метод,
+        возвращая None – тогда экспорт идёт вообще без второго окна
+        (в offscreen любые модалки невозможны по определению)."""
+        dlg = ReportProgress(self)
+        dlg.show_progress()
+        return dlg
+
     def _do_export(self) -> None:
         path = self.path_edit.text().strip()
         if not path:
@@ -125,14 +188,22 @@ class DocxExportDialog(QDialog):
         # (pandoc работает во временном каталоге) – нормализуем поле
         path = os.path.abspath(path)
         self.path_edit.setText(path)
+        # Сессия 20 (просьба заказчика): видно, на каком этапе сейчас
+        # формирование – схемы, текст, конвертация, зачистка, проверка
+        prog = self._make_progress()
         try:
             export_docx(path, self._objects, self._trees, self._kb,
                         self._ctx_map, self._owner_titles,
-                        self.size_combo.currentData(), canvas=self._canvas)
+                        self.size_combo.currentData(), canvas=self._canvas,
+                        progress=(prog.stage if prog is not None else None))
         except Exception as exc:  # noqa: BLE001 – русская диагностика
+            if prog is not None:
+                prog.close_progress()
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Экспорт DOCX", str(exc))
             return
+        if prog is not None:
+            prog.close_progress()
         # Задача 3 (сессия 19): публикуем фактический путь успешного
         # экспорта – по нему MainWindow покажет вопрос об открытии отчета
         self.exported_path = path
