@@ -54,3 +54,13 @@ settings/
 
 # резервные копии шаблона
 *.docx.bak
+
+# Артефакты сборки поставки (сессия 21): нативный запускатель Kuji.exe
+# собирается на месте из tools\launcher\KujiLauncher.cs скриптом
+# build_exe.ps1, папка поставки — из tools\dist\make_dist.ps1. В репозитории
+# остаётся исходный код сборки и run_app.cmd как публичный способ запуска.
+Kuji.exe
+Kuji.lnk
+# Якорь именно в корне: без слэша pattern «dist/» проглотил бы и
+# tools/dist/make_dist.ps1 (исходный код сборки).
+/dist/
