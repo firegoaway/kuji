@@ -971,15 +971,19 @@ InnoSetup/NSIS` — отсутствуют.
 для DOCX: `PANDOC_EXE = parents[2]\runtime\pandoc\pandoc.exe`). QtWebEngine,
 QML/Quick, Designer, PDF, мультимедиа, Network и т. п. не импортируются
 нигде — `make_dist.ps1` вырезает их вместе с `*.pyi`, `metatypes`, `include`,
-`typesystems`, `qml/`, `*.pak`, переводами кроме ru/en, плагинами кроме
-`platforms, styles, imageformats, iconengines, generic, textcoders` и
-`Scripts\pyside6-*.exe`. Замер: дерево проекта 1038 МБ → папка поставки
-412 МБ → `7z` 70,8 МБ (LZMA2:28 + BCJ/ARM64, solid, 3 блока). `opengl32sw.dll`
-(20 МБ) оставлен намеренно — страховка для машин без аппаратного OpenGL;
-`icudtl.dat` — тоже.
+`typesystems`, `qml/`, `resources\*.pak` и `icudtl.dat`, `pip` (≈570 файлов),
+переводами кроме ru/en, плагинами кроме
+`platforms, styles, imageformats, iconengines, generic, textcoders`, утилитами
+Qt (`Scripts\pyside6-*`, а также `*.exe`/`*.lib` внутри PySide6 и shiboken6) и
+`shiboken6\include`. Финальный замер 23.11.2026: дерево проекта 1038 МБ →
+папка поставки 335,5 МБ → `zip` 84,5 МБ и `7z` 55,2 МБ. `opengl32sw.dll`
+(20 МБ) оставлен намеренно — страховка для машин без аппаратного OpenGL.
+Архив пакуется САМОЙ папкой, а не её содержимым: внутри всё лежит в `Kuji\`,
+поэтому «Извлечь всё» даёт одну аккуратную папку, и путь
+`RunProgram="Kuji\Kuji.exe"` у SFX-установщика оказывается верным.
 Проверка именно на УРЕЗАННОМ окружении (подтверждено `PySide6.__file__` из
 `dist\Kuji\...\site-packages`, Qt 6.12.0): smoke 30 — PASSED, gestures 64 —
-PASSED, visual QA — exit 0. Полное дерево (`-Profile full`) остаётся эталон,
+PASSED, visual QA — exit 0. Полное дерево (`-Profile full`) остаётся эталоном,
 которым можно перепроверить в любой момент.
 
 **Ловушка №1 (реально поймана).** Проверочный запуск поставки создаёт ВНУТРИ
@@ -999,9 +1003,9 @@ PASSED, visual QA — exit 0. Полное дерево (`-Profile full`) ост
 читает его как ANSI, русские комментарии разбираются на токены и синтаксис
 ломается («Unexpected token '}'»). Признак — мусор вида `РёР»РѕСЃСЊ` в
 сообщении парсера. После КАЖДОЙ правки `.ps1` переставлять BOM и проверять
-`[System.Management.Automation.PSParser]::Tokenize`. В `Установить ярлык.cmd`
-наоборот — BOM убивает batch (`cmd.exe` не понимает `﻿@echo off`),
-поэтому он пишется `UTF8Encoding($false)` + `chcp 65001`.
+`PSParser::Tokenize`. Батчники `install_shortcut.cmd` и `build_exe.cmd` —
+наоборот: батч обязан быть чистым ASCII (ловушка №6), а `UTF8Encoding($false)`
+дополнительно спасает SFX-конфиг (ловушка №2b).
 
 **Ловушка №2b (BOM в SFX-конфиге).** Третье направление той же ошибки:
  `Set-Content -Encoding UTF8` ставит `EF BB BF` перед `;!@Install@!`, из-за
@@ -1038,3 +1042,33 @@ PASSED, visual QA — exit 0. Полное дерево (`-Profile full`) ост
 исходник сборки `tools/dist/make_dist.ps1`. Нужен якорь `/dist/`.
 Проверка после любой правки игноров: `git add -A` и `git ls-files tools/`
 (в индексе обязаны быть все три файла сборки).
+
+**Ловушка №5 (кириллица в именах внутри zip).** 7-Zip по умолчанию пишет имена
+записей в OEM-странице без UTF-8 флага (bit 11), и `КАК ЗАПУСТИТЬ.txt` после
+«Извлечь всё» превращается в `ЉЂЉ ‡ЂЏ“‘’€’њ.txt`: и проводник, и
+`[IO.Compression.ZipFile]` читают такое имя как CP437. Лечится переключателем
+`-mcu` (замер 23.11.2026: без него — каша, с ним — корректное имя). Проверка
+обязательна сразу после сборки: открыть zip через
+`[IO.Compression.ZipFile]::OpenRead` и посчитать записи с не-ASCII именами.
+
+**Ловушка №6 (кириллица в самом .cmd).** cmd.exe при не-ASCII в теле батча
+рассинхронизирует пакетный читатель и начинает ИСПОЛНЯТЬ фрагменты комментариев
+— проверено на первой версии `build_exe.cmd`, которая выдала «'каждой' is not
+recognized as an internal or external command». Правило: `.cmd` только ASCII,
+русские сообщения — в вызываемом `.ps1` с BOM. Отсюда пара файлов в поставке:
+`install_shortcut.cmd` (ASCII) + `make_shortcut.ps1` (русский).
+
+**Ловушка №7 (мелочи PowerShell, стоившие прогонов).** `[char] * 3` не определён
+— умножать нужно `[string]`; `$m` и `$M` — ОДНА и та же переменная
+(регистронезависимость), из-за чего путь стал массивом и `WriteAllText` выдал
+«Illegal characters in path»; here-string нельзя вставлять в аргументы метода;
+`git commit -F -` не принимает here-string (он уходит в argv как pathspec) —
+текст сообщения пишется во временный файл.
+
+**Публикация релиза (23.11.2026).** Лимит одного вложения GitHub — 100 МБ, все
+три артефакта в него входят. `make_dist.ps1` кладёт рядом `.sha256.txt` и
+генерирует `Kuji-<версия>-release-notes.md` — готовый русский текст страницы
+Releases: как распаковать, системные требования, честное предупреждение про
+SmartScreen из-за отсутствия подписи, таблица размеров и SHA-256. Закачка —
+через GitHub API токеном из Windows Credential Manager; `git credential fill`
+требует завершающую пустую строку на stdin, а сам токен в вывод не печатается.
